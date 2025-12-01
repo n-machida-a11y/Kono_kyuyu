@@ -1,0 +1,322 @@
+/**
+ * @OnlyCurrentDoc
+ */
+
+// --- 定数定義 ---
+const SHEET_DATA_PARENT = "請求データ_親";
+const SHEET_DATA_CHILD = "請求データ_子";
+const SHEET_ITEMS = "抽出項目";
+const SHEET_RULES = "ルール設定";
+
+// ★ モデル指定
+const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models/";
+const GEMINI_API_MODEL = "gemini-2.5-pro"; 
+
+/**
+ * Webアプリケーションのメインエントリーポイント。
+ */
+function doGet() {
+  return HtmlService.createTemplateFromFile('index.html')
+    .evaluate()
+    .setTitle('請求書OCRアプリ(フォルダ保存版)') 
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+/**
+ * 初期データ（項目リスト）の取得
+ */
+function getInitialData() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const itemSheet = ss.getSheetByName(SHEET_ITEMS);
+    if (!itemSheet) {
+      throw new Error(`シート「${SHEET_ITEMS}」が見つかりません。`);
+    }
+    const lastRow = itemSheet.getLastRow();
+    if (lastRow < 2) {
+      return { parentItems: [], childItems: [] };
+    }
+    
+    const data = itemSheet.getRange(2, 1, lastRow - 1, 2).getValues();
+    
+    const parentItems = [];
+    const childItems = [];
+
+    data.forEach(row => {
+      const itemName = row[0];
+      const itemType = row[1];
+      
+      if (itemName) {
+        if (itemType === '親') {
+          parentItems.push(itemName);
+        } else if (itemType === '子') {
+          childItems.push(itemName);
+        }
+      }
+    });
+
+    return { parentItems: parentItems, childItems: childItems };
+
+  } catch (e) {
+    Logger.log(`getInitialDataエラー: ${e.message}`);
+    return { error: e.message };
+  }
+}
+
+
+/**
+ * OCR実行処理
+ */
+function runOcr(imagesDataList, groupName) {
+  try {
+    Logger.log(`OCR処理開始: ${groupName} (ファイル数: ${imagesDataList.length})`);
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const itemSheet = ss.getSheetByName(SHEET_ITEMS);
+    if (!itemSheet) throw new Error(`シート「${SHEET_ITEMS}」が見つかりません。`);
+    
+    const itemData = itemSheet.getRange(2, 1, itemSheet.getLastRow() - 1, 2).getValues();
+    const parentItems = itemData.filter(row => row[0] && row[1] === '親').map(row => row[0]);
+    const childItems = itemData.filter(row => row[0] && row[1] === '子').map(row => row[0]);
+
+    const ruleSheet = ss.getSheetByName(SHEET_RULES);
+    let rules = [];
+    if (ruleSheet && ruleSheet.getLastRow() > 1) {
+      const ruleValues = ruleSheet.getRange(2, 1, ruleSheet.getLastRow() - 1, 2).getValues();
+      rules = ruleValues
+        .map(row => ({ content: row[0], level: row[1] }))
+        .filter(r => r.content && r.level);
+    }
+
+    // プロンプト生成
+    const prompt = buildPrompt(parentItems, childItems, rules);
+
+    // Gemini API呼び出し
+    const jsonText = callGeminiAPI(imagesDataList, prompt);
+    
+    let extractedData;
+    try {
+      let cleanJson = jsonText;
+      if (cleanJson.includes('```json')) {
+        cleanJson = cleanJson.split('```json')[1].split('```')[0].trim();
+      } else if (cleanJson.includes('```')) {
+        cleanJson = cleanJson.split('```')[1].split('```')[0].trim();
+      }
+      extractedData = JSON.parse(cleanJson);
+    } catch (e) {
+      Logger.log(`JSONパース失敗: ${e.message}`);
+      throw new Error("AIの応答をJSONとして読み取れませんでした。");
+    }
+    
+    if (!extractedData.parent || !Array.isArray(extractedData.child)) {
+      throw new Error("AIが期待する親子構造のJSONを返しませんでした。");
+    }
+
+    // 結果返却
+    return {
+      extractedData: extractedData,
+      base64Data: imagesDataList[0].base64, 
+      mimeType: imagesDataList[0].mimeType,
+      fileName: groupName
+    };
+
+  } catch (e) {
+    Logger.log(`runOcrエラー: ${e.message}`);
+    if (e.message.includes("exceeded")) {
+       return { error: `ファイルサイズが大きすぎます。APIの制限を超えました。` };
+    }
+    return { error: `OCR処理に失敗しました: ${e.message}` };
+  }
+}
+
+/**
+ * プロンプト構築
+ */
+function buildPrompt(parentItems, childItems, rules) {
+  rules.sort((a, b) => b.level - a.level);
+  
+  return `
+添付された資料（請求書、明細書など）は複数ページ、または複数のファイルで構成されています。
+**全てのページ・ファイルの内容を読み取り、統合して**以下のデータを抽出してください。
+特に「明細行（子項目）」は、2枚目以降のファイルに含まれている可能性が高いため、見落とさないように注意してください。
+
+# 1. 抽出項目リスト
+## 1.1. 親項目 (parent)
+請求書全体で1つだけ存在する項目です（請求書番号、合計金額、請求日など）。
+${parentItems.map(item => `- ${item}`).join('\n') || "（なし）"}
+
+## 1.2. 子項目 (child)
+**明細行**です。全てのページの明細を漏らさずリストアップしてください。
+${childItems.map(item => `- ${item}`).join('\n') || "（なし）"}
+
+# 2. ルール
+${rules.map(r => `- [重要度${r.level}] ${r.content}`).join('\n')}
+
+# 3. 出力形式 (厳格なJSON)
+{
+  "parent": { ... },
+  "child": [ ... ]
+}
+`.trim();
+}
+
+/**
+ * Gemini API呼び出し
+ */
+function callGeminiAPI(imagesDataList, prompt) {
+  const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  if (!apiKey) throw new Error('GEMINI_API_KEY が設定されていません。');
+
+  const url = `${GEMINI_API_BASE}${GEMINI_API_MODEL}:generateContent?key=${apiKey}`;
+
+  const contentParts = [
+    { "text": prompt }
+  ];
+
+  imagesDataList.forEach(img => {
+    contentParts.push({
+      "inline_data": {
+        "mime_type": img.mimeType,
+        "data": img.base64
+      }
+    });
+  });
+
+  const payload = {
+    "contents": [{
+      "parts": contentParts
+    }],
+    "generationConfig": {
+      "responseMimeType": "application/json",
+    }
+  };
+
+  const options = {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true,
+    deadline: 120
+  };
+
+  const response = UrlFetchApp.fetch(url, options);
+  const responseCode = response.getResponseCode();
+  
+  if (responseCode === 200) {
+    const jsonResponse = JSON.parse(response.getContentText());
+    return jsonResponse.candidates[0].content.parts[0].text;
+  } else {
+    throw new Error(`APIリクエスト失敗: ${responseCode} ${response.getContentText()}`);
+  }
+}
+
+/**
+ * データ保存処理
+ */
+function saveAllData(allResults) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    
+    const parentSheet = ss.getSheetByName(SHEET_DATA_PARENT);
+    const parentSheetHeaders = parentSheet.getRange(1, 1, 1, parentSheet.getLastColumn()).getValues()[0];
+
+    const childSheet = ss.getSheetByName(SHEET_DATA_CHILD);
+    const childSheetHeaders = childSheet.getRange(1, 1, 1, childSheet.getLastColumn()).getValues()[0];
+
+    const parentRowsToAppend = [];
+    const childRowsToAppend = [];
+
+    const rootFolder = DriveApp.getRootFolder(); 
+
+    allResults.forEach(record => {
+      const { extractedData, allImagesData, fileName } = record;
+      
+      const parentData = extractedData.parent || {};
+      const childData = extractedData.child || [];
+      const invoiceId = Utilities.getUuid();
+
+      // --- 1. フォルダ作成ロジック (企業名特定ロジック強化) ---
+      let companyName = "";
+
+      // (A) キー名から探す ("取引先", "請求元" などを優先)
+      const keyKeywords = ["取引先", "請求元", "請求先", "相手先", "企業", "会社", "店舗", "店名"];
+      for (const kw of keyKeywords) {
+        const foundKey = Object.keys(parentData).find(k => k.includes(kw) && parentData[k]);
+        if (foundKey) {
+          companyName = parentData[foundKey];
+          break;
+        }
+      }
+
+      // (B) 値から「株式会社」などを探す（フォールバック）
+      if (!companyName) {
+        const valueKeywords = ["株式会社", "有限会社", "合同会社", "(株)", "(有)"];
+        for (const key in parentData) {
+          const val = String(parentData[key]);
+          if (valueKeywords.some(vk => val.includes(vk))) {
+            companyName = val;
+            break;
+          }
+        }
+      }
+
+      // (C) それでもなければ「不明な企業」
+      if (!companyName) companyName = "不明な企業";
+
+      // 日付は「今日(Today)」を使用し yyyy/MM/dd 形式にする
+      const today = new Date();
+      const formattedDate = Utilities.formatDate(today, "Asia/Tokyo", "yyyy/MM/dd");
+
+      // ★ フォルダ名: 取引先_yyyy/MM/dd
+      const folderName = `${companyName}_${formattedDate}`;
+
+      // フォルダ作成
+      const newFolder = rootFolder.createFolder(folderName);
+      const folderUrl = newFolder.getUrl();
+
+      // --- 2. ファイルをフォルダに保存 ---
+      if (allImagesData && Array.isArray(allImagesData)) {
+        allImagesData.forEach((img, idx) => {
+          const blob = Utilities.newBlob(Utilities.base64Decode(img.base64), img.mimeType, img.fileName || `file_${idx + 1}`);
+          newFolder.createFile(blob);
+        });
+      } else {
+        newFolder.createFile("error.txt", "画像データが見つかりませんでした。");
+      }
+
+      // --- 3. スプレッドシート用データ作成 ---
+      const newParentRow = parentSheetHeaders.map(header => {
+        if (header === 'InvoiceID') return invoiceId;
+        if (header.includes("リンク")) return folderUrl;
+        if (header === '保存日時') return new Date();
+        return parentData[header] || "";
+      });
+      
+      const newChildRows = childData.map(childRecord => {
+        return childSheetHeaders.map(header => {
+          if (header === 'InvoiceID') return invoiceId;
+          if (header === 'LineItemID') return Utilities.getUuid();
+          return childRecord[header] || "";
+        });
+      });
+
+      parentRowsToAppend.push(newParentRow);
+      childRowsToAppend.push(...newChildRows);
+    });
+
+    if (parentRowsToAppend.length > 0) {
+      parentSheet.getRange(parentSheet.getLastRow() + 1, 1, parentRowsToAppend.length, parentSheetHeaders.length)
+        .setValues(parentRowsToAppend);
+    }
+    if (childRowsToAppend.length > 0) {
+      childSheet.getRange(childSheet.getLastRow() + 1, 1, childRowsToAppend.length, childSheetHeaders.length)
+        .setValues(childRowsToAppend);
+    }
+
+    return { status: "success", message: `${parentRowsToAppend.length}件のデータを保存しました。\nフォルダ: ${parentRowsToAppend[0] ? parentRowsToAppend[0][1] : ''} など` };
+
+  } catch (e) {
+    Logger.log(e);
+    return { error: `保存に失敗しました: ${e.message}` };
+  }
+}
