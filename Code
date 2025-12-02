@@ -2,321 +2,775 @@
  * @OnlyCurrentDoc
  */
 
-// --- 定数定義 ---
-const SHEET_DATA_PARENT = "請求データ_親";
-const SHEET_DATA_CHILD = "請求データ_子";
-const SHEET_ITEMS = "抽出項目";
-const SHEET_RULES = "ルール設定";
+// --- 設定: スクリプトプロパティのキー名 ---
+const PROP_API_KEY = 'GEMINI_API_KEY';
+const PROP_RECEIPT_FOLDER_ID = 'RECEIPT_FOLDER_ID'; // レシート用
+const PROP_INVOICE_FOLDER_ID = 'INVOICE_FOLDER_ID'; // 請求書用
 
-// ★ モデル指定
-const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models/";
-const GEMINI_API_MODEL = "gemini-2.5-pro"; 
+// --- 定数定義 ---
+const SHEET_RECEIPT = "A_給油実績";       
+const SHEET_VEHICLE_MASTER = "A_車両番号マスタ";
+const SHEET_OFFICE_MASTER = "A_営業所マスタ"; 
+const SHEET_MONTHLY_DATA = "B_月次データ";
+const SHEET_INVOICE_PARENT = "請求データ_親";
+const SHEET_INVOICE_CHILD = "請求データ_子";
+
+const MODEL_RECEIPT = "gemini-2.5-pro";
+const MODEL_INVOICE = "gemini-2.5-pro";
 
 /**
- * Webアプリケーションのメインエントリーポイント。
+ * ウェブアプリのエントリーポイント
  */
 function doGet() {
   return HtmlService.createTemplateFromFile('index.html')
     .evaluate()
-    .setTitle('請求書OCRアプリ(フォルダ保存版)') 
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+    .setTitle('統合OCRアプリ')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+// ---------------------------------------------------------
+//  ★照合機能 (GAS再実装 - 高速化)
+// ---------------------------------------------------------
+
+/**
+ * 車両番号の正規化 (数字以外を除去し、表記揺れに対応)
+ * @param {string} carNo 
+ * @returns {string}
+ */
+function normalizeCarNo(carNo) {
+  let normalized = String(carNo || '')
+    .replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0)) // 全角数字を半角に
+    .replace(/[^\w\s]/g, '') // 記号を除去
+    .replace(/\s+/g, ''); // 空白を除去
+    
+  return normalized;
 }
 
 /**
- * 初期データ（項目リスト）の取得
+ * 日付を YYYY-MM-DD 形式に整形
+ * @param {Date|string} dateValue 
+ * @returns {string|null}
  */
-function getInitialData() {
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const itemSheet = ss.getSheetByName(SHEET_ITEMS);
-    if (!itemSheet) {
-      throw new Error(`シート「${SHEET_ITEMS}」が見つかりません。`);
-    }
-    const lastRow = itemSheet.getLastRow();
-    if (lastRow < 2) {
-      return { parentItems: [], childItems: [] };
-    }
-    
-    const data = itemSheet.getRange(2, 1, lastRow - 1, 2).getValues();
-    
-    const parentItems = [];
-    const childItems = [];
+function formatDateKey(dateValue) {
+  if (!dateValue) return null;
+  const dateObj = (dateValue instanceof Date) ? dateValue : new Date(dateValue);
+  if (isNaN(dateObj.getTime())) return null;
+  return Utilities.formatDate(dateObj, "Asia/Tokyo", "yyyy-MM-dd");
+}
 
-    data.forEach(row => {
-      const itemName = row[0];
-      const itemType = row[1];
-      
-      if (itemName) {
-        if (itemType === '親') {
-          parentItems.push(itemName);
-        } else if (itemType === '子') {
-          childItems.push(itemName);
+/**
+ * 【新規機能】過去に登録された請求書リストを取得
+ */
+function getInvoiceList() {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const pSheet = ss.getSheetByName(SHEET_INVOICE_PARENT);
+    if (!pSheet) return { error: "請求データ_親 シートが見つかりません。" };
+
+    const data = pSheet.getDataRange().getValues();
+    const headers = data.shift();
+
+    const idxId = headers.indexOf("InvoiceID");
+    const idxVendor = headers.indexOf("取引先名");
+    const idxDate = headers.indexOf("日時");
+    const idxTotal = headers.indexOf("総額");
+
+    if (idxId === -1 || idxVendor === -1 || idxDate === -1 || idxTotal === -1) {
+        return { error: "親シートのヘッダーが不足しています。" };
+    }
+
+    const list = data.map(row => {
+        const dateStr = formatDateKey(row[idxDate]);
+        return {
+            id: row[idxId],
+            vendor: String(row[idxVendor] || '-'),
+            date: dateStr || '-',
+            total: (Number(row[idxTotal]) || 0).toLocaleString()
+        };
+    }).filter(item => item.id); // IDがない行は除外
+
+    // 日付が新しい順にソート
+    list.sort((a, b) => b.date.localeCompare(a.date));
+
+    return { list: list };
+}
+
+/**
+ * 【新規機能】特定の請求書IDの明細と照合データを取得
+ * @param {string} invoiceId - 請求データ_親のInvoiceID
+ * @returns {object} - 明細データと照合データを含むオブジェクト
+ */
+function getInvoiceDetailsAndReconciliation(invoiceId) {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const cSheet = ss.getSheetByName(SHEET_INVOICE_CHILD);
+    const rSheet = ss.getSheetByName(SHEET_RECEIPT);
+
+    if (!cSheet || !rSheet) {
+        return { error: "請求データ_子 または A_給油実績 シートが見つかりません。" };
+    }
+
+    // 1. 請求書明細 (子シート) の取得
+    const cData = cSheet.getDataRange().getValues();
+    const cHeaders = cData.shift();
+    const cIdxInvoiceId = cHeaders.indexOf("InvoiceID");
+    const cIdxDate = cHeaders.indexOf("日付");
+    const cIdxCar = cHeaders.indexOf("車両番号");
+    const cIdxQty = cHeaders.indexOf("数量");
+
+    const detailHeaders = ["日付", "車両番号", "商品名", "数量", "単価", "金額"];
+    const details = [];
+
+    // 明細データ処理
+    const invoiceDetails = cData.filter(row => row[cIdxInvoiceId] === invoiceId);
+    
+    // 照合計算用のマップを初期化
+    const invoiceMap = {};
+
+    invoiceDetails.forEach((row, index) => {
+        // 明細リストの整形 (UI表示用)
+        const item = {};
+        cHeaders.forEach((header, idx) => {
+            if (header === "車両番号") item.carNo = String(row[idx] || '').trim();
+            if (header === "日付") item.date = formatDateKey(row[idx]);
+            if (header === "商品名") item.itemName = String(row[idx] || '-');
+            if (header === "数量") item.quantity = Number(row[idx]) || 0;
+            if (header === "単価") item.unitPrice = Number(row[idx]) || 0;
+            if (header === "金額") item.amount = Number(row[idx]) || 0;
+        });
+        
+        // UIの編集機能で使用する一時IDを付与
+        item.id = Utilities.getUuid(); 
+        details.push(item);
+        
+        // 照合用マップの更新
+        const key = `${item.date}_${normalizeCarNo(item.carNo)}`;
+        if (!invoiceMap[key]) {
+            invoiceMap[key] = { date: item.date, carNo: item.carNo, invoiceQty: 0, receiptQty: 0 };
         }
-      }
+        invoiceMap[key].invoiceQty += item.quantity;
+    });
+    
+    // 2. レシート実績 (A_給油実績) の取得と照合
+    const rData = rSheet.getDataRange().getValues();
+    const rHeaders = rData.shift();
+    const rIdxDate = rHeaders.indexOf("給油日");
+    const rIdxCar = rHeaders.indexOf("車両番号");
+    const rIdxQty = rHeaders.indexOf("数量");
+
+    const targetYm = invoiceDetails.length > 0 ? formatDateKey(invoiceDetails[0][cIdxDate]).substring(0, 7) : null;
+
+    rData.forEach(row => {
+        const date = formatDateKey(row[rIdxDate]);
+        const carNo = String(row[rIdxCar]);
+        const qty = Number(row[rIdxQty]) || 0;
+        
+        if (!date || !carNo || date.substring(0, 7) !== targetYm) return;
+        
+        const key = `${date}_${normalizeCarNo(carNo)}`;
+
+        if (!invoiceMap[key]) {
+            // 請求書にはないが、レシートに存在するデータ
+            invoiceMap[key] = { date: date, carNo: carNo, invoiceQty: 0, receiptQty: 0 };
+        }
+        invoiceMap[key].receiptQty += qty;
     });
 
-    return { parentItems: parentItems, childItems: childItems };
+    // 3. 照合判定と配列化
+    const reconciliationList = Object.values(invoiceMap).map(item => {
+        item.diff = Math.round((item.receiptQty - item.invoiceQty) * 100) / 100;
 
-  } catch (e) {
-    Logger.log(`getInitialDataエラー: ${e.message}`);
-    return { error: e.message };
-  }
+        if (item.receiptQty > 0 && item.invoiceQty > 0) {
+            if (Math.abs(item.diff) < 0.1) {
+                item.status = "OK";
+            } else {
+                item.status = "NG";
+            }
+        } else if (item.receiptQty > 0 && item.invoiceQty === 0) {
+            item.status = "NO_INVOICE"; // 請求書にはない（レシートのみ）
+        } else if (item.receiptQty === 0 && item.invoiceQty > 0) {
+            item.status = "NO_RECEIPT"; // レシートなし（請求書のみ）
+        } else {
+            item.status = "UNKNOWN";
+        }
+        return item;
+    });
+
+    return { details: details, reconciliation: reconciliationList, headers: detailHeaders };
 }
 
 
 /**
- * OCR実行処理
+ * 指定月の照合データをGAS内で処理・取得 (画面表示用)
+ * ※この関数はTAB4: Reconcile のために残します
  */
-function runOcr(imagesDataList, groupName) {
-  try {
-    Logger.log(`OCR処理開始: ${groupName} (ファイル数: ${imagesDataList.length})`);
-
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const itemSheet = ss.getSheetByName(SHEET_ITEMS);
-    if (!itemSheet) throw new Error(`シート「${SHEET_ITEMS}」が見つかりません。`);
-    
-    const itemData = itemSheet.getRange(2, 1, itemSheet.getLastRow() - 1, 2).getValues();
-    const parentItems = itemData.filter(row => row[0] && row[1] === '親').map(row => row[0]);
-    const childItems = itemData.filter(row => row[0] && row[1] === '子').map(row => row[0]);
-
-    const ruleSheet = ss.getSheetByName(SHEET_RULES);
-    let rules = [];
-    if (ruleSheet && ruleSheet.getLastRow() > 1) {
-      const ruleValues = ruleSheet.getRange(2, 1, ruleSheet.getLastRow() - 1, 2).getValues();
-      rules = ruleValues
-        .map(row => ({ content: row[0], level: row[1] }))
-        .filter(r => r.content && r.level);
-    }
-
-    // プロンプト生成
-    const prompt = buildPrompt(parentItems, childItems, rules);
-
-    // Gemini API呼び出し
-    const jsonText = callGeminiAPI(imagesDataList, prompt);
-    
-    let extractedData;
-    try {
-      let cleanJson = jsonText;
-      if (cleanJson.includes('```json')) {
-        cleanJson = cleanJson.split('```json')[1].split('```')[0].trim();
-      } else if (cleanJson.includes('```')) {
-        cleanJson = cleanJson.split('```')[1].split('```')[0].trim();
-      }
-      extractedData = JSON.parse(cleanJson);
-    } catch (e) {
-      Logger.log(`JSONパース失敗: ${e.message}`);
-      throw new Error("AIの応答をJSONとして読み取れませんでした。");
-    }
-    
-    if (!extractedData.parent || !Array.isArray(extractedData.child)) {
-      throw new Error("AIが期待する親子構造のJSONを返しませんでした。");
-    }
-
-    // 結果返却
-    return {
-      extractedData: extractedData,
-      base64Data: imagesDataList[0].base64, 
-      mimeType: imagesDataList[0].mimeType,
-      fileName: groupName
-    };
-
-  } catch (e) {
-    Logger.log(`runOcrエラー: ${e.message}`);
-    if (e.message.includes("exceeded")) {
-       return { error: `ファイルサイズが大きすぎます。APIの制限を超えました。` };
-    }
-    return { error: `OCR処理に失敗しました: ${e.message}` };
-  }
-}
-
-/**
- * プロンプト構築
- */
-function buildPrompt(parentItems, childItems, rules) {
-  rules.sort((a, b) => b.level - a.level);
+function getReconciliationViewData(yyyymm) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
   
-  return `
-添付された資料（請求書、明細書など）は複数ページ、または複数のファイルで構成されています。
-**全てのページ・ファイルの内容を読み取り、統合して**以下のデータを抽出してください。
-特に「明細行（子項目）」は、2枚目以降のファイルに含まれている可能性が高いため、見落とさないように注意してください。
+  // マップ作成: key = "yyyy-MM-dd_NormalizedCarNo", value = { date, carNo, receiptQty, invoiceQty, ... }
+  const dataMap = {};
+  // ... (getReconciliationData 関数の中身を再利用)
+  
+  const processData = (sheetName, qtyIndex, carIndex, dateIndex, isReceipt) => {
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return;
+    
+    // データは必要な列のみ取得し、処理を高速化
+    const allData = sheet.getDataRange().getValues();
+    const headers = allData.shift();
+    
+    // ヘッダーからのインデックス再確認（シートの列順が固定でない場合に備える）
+    const idxDate = headers.indexOf(dateIndex);
+    const carHeader = (sheetName === SHEET_RECEIPT) ? "車両番号" : "車両情報";
+    const idxCar = headers.findIndex(h => h.includes(carHeader)); 
+    const idxQty = headers.indexOf(qtyIndex);
 
-# 1. 抽出項目リスト
-## 1.1. 親項目 (parent)
-請求書全体で1つだけ存在する項目です（請求書番号、合計金額、請求日など）。
-${parentItems.map(item => `- ${item}`).join('\n') || "（なし）"}
+    if (idxDate === -1 || idxCar === -1 || idxQty === -1) {
+      Logger.log(`Error: Sheet ${sheetName} missing columns: ${dateIndex}, ${carHeader}, ${qtyIndex}`);
+      return;
+    }
 
-## 1.2. 子項目 (child)
-**明細行**です。全てのページの明細を漏らさずリストアップしてください。
-${childItems.map(item => `- ${item}`).join('\n') || "（なし）"}
+    allData.forEach(row => {
+      const dateKey = formatDateKey(row[idxDate]);
+      const carNo = String(row[idxCar]);
+      const normalizedCarNo = normalizeCarNo(carNo);
+      const qty = Number(row[idxQty]) || 0;
+      
+      if (!dateKey || !normalizedCarNo) return;
+      if (!dateKey.startsWith(yyyymm)) return;
 
-# 2. ルール
-${rules.map(r => `- [重要度${r.level}] ${r.content}`).join('\n')}
+      const key = `${dateKey}_${normalizedCarNo}`;
 
-# 3. 出力形式 (厳格なJSON)
-{
-  "parent": { ... },
-  "child": [ ... ]
-}
-`.trim();
-}
-
-/**
- * Gemini API呼び出し
- */
-function callGeminiAPI(imagesDataList, prompt) {
-  const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
-  if (!apiKey) throw new Error('GEMINI_API_KEY が設定されていません。');
-
-  const url = `${GEMINI_API_BASE}${GEMINI_API_MODEL}:generateContent?key=${apiKey}`;
-
-  const contentParts = [
-    { "text": prompt }
-  ];
-
-  imagesDataList.forEach(img => {
-    contentParts.push({
-      "inline_data": {
-        "mime_type": img.mimeType,
-        "data": img.base64
+      if (!dataMap[key]) {
+        dataMap[key] = {
+          date: dateKey,
+          carNo: carNo, 
+          receiptQty: 0,
+          invoiceQty: 0,
+          diff: 0,
+          status: ""
+        };
+      }
+      
+      if (isReceipt) {
+        dataMap[key].receiptQty += qty;
+      } else {
+        dataMap[key].invoiceQty += qty;
       }
     });
-  });
-
-  const payload = {
-    "contents": [{
-      "parts": contentParts
-    }],
-    "generationConfig": {
-      "responseMimeType": "application/json",
-    }
   };
 
+  // 1. レシート実績 (A_給油実績) の集計
+  processData(SHEET_RECEIPT, "数量", "車両番号", "給油日", true); 
+
+  // 2. 請求書データ (請求データ_子) の集計
+  processData(SHEET_INVOICE_CHILD, "数量", "車両情報", "日付", false);
+
+  // 3. 照合判定 & 配列化
+  const resultList = Object.values(dataMap).map(item => {
+    item.diff = Math.round((item.receiptQty - item.invoiceQty) * 100) / 100;
+    
+    if (item.receiptQty > 0 && item.invoiceQty > 0) {
+      if (Math.abs(item.diff) < 0.1) {
+        item.status = "OK";
+      } else {
+        item.status = "NG";
+      }
+    } else if (item.receiptQty > 0 && item.invoiceQty === 0) {
+      item.status = "NO_INVOICE"; 
+    } else if (item.receiptQty === 0 && item.invoiceQty > 0) {
+      item.status = "NO_RECEIPT"; 
+    } else {
+      item.status = "UNKNOWN";
+    }
+    
+    return item;
+  });
+
+  resultList.sort((a, b) => {
+    if (a.date !== b.date) return a.date.localeCompare(b.date);
+    return String(a.carNo).localeCompare(String(b.carNo));
+  });
+
+  return resultList;
+}
+
+/**
+ * 請求書の全明細を取得 (旧TAB5: 明細タブ用 - 今後は使用しない)
+ */
+function getAllInvoiceDetails() {
+    return { headers: ["日付", "車両番号", "商品名", "数量", "単価", "金額"], data: [], error: "この機能は「請求書」タブに統合されました。" };
+}
+
+// ---------------------------------------------------------
+//  既存機能 (共通ユーティリティ)
+// ---------------------------------------------------------
+function getCurrentUserOffice() {
+  const email = Session.getActiveUser().getEmail();
+  if (!email) return "ゲスト"; 
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const oSheet = ss.getSheetByName(SHEET_OFFICE_MASTER);
+  if (!oSheet) return "マスタエラー";
+
+  const data = oSheet.getDataRange().getValues();
+  const headers = data.shift();
+  const idxOffice = headers.findIndex(h => h.includes("営業所") && !h.includes("ID"));
+  const idxEmail = headers.findIndex(h => h.includes("アドレス") || h.includes("メール"));
+
+  if (idxOffice === -1 || idxEmail === -1) return "マスタ定義エラー";
+
+  for (const row of data) {
+    if (String(row[idxEmail]).trim() === email) {
+      return String(row[idxOffice]).trim();
+    }
+  }
+  return "所属不明"; 
+}
+
+function tryGetFolder(id) {
+  try { return DriveApp.getFolderById(id); } catch(e) { return DriveApp.getRootFolder(); }
+}
+
+function callGemini(contentsPayload, modelName) {
+  const apiKey = PropertiesService.getScriptProperties().getProperty(PROP_API_KEY);
+  if (!apiKey) throw new Error('APIキー未設定');
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+  
+  let payload;
+  if (ArrayOfObjects(contentsPayload)) {
+    payload = { contents: contentsPayload };
+  } else {
+    payload = { contents: contentsPayload };
+  }
+  
+  payload.generationConfig = { response_mime_type: "application/json" };
+
   const options = {
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true,
-    deadline: 120
+    method: 'post', contentType: 'application/json', payload: JSON.stringify(payload), muteHttpExceptions: true
   };
 
   const response = UrlFetchApp.fetch(url, options);
-  const responseCode = response.getResponseCode();
+  if (response.getResponseCode() !== 200) throw new Error(`API Error: ${response.getResponseCode()}`);
+  return JSON.parse(response.getContentText()).candidates[0].content.parts[0].text;
+}
+
+function ArrayOfObjects(obj) {
+    return Array.isArray(obj) && obj.every(item => typeof item === 'object' && item !== null);
+}
+
+// ---------------------------------------------------------
+//  モバイル (レシート登録) 機能
+// ---------------------------------------------------------
+
+function getUsageStats() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // 1. 車両マスタ取得
+  const vSheet = ss.getSheetByName(SHEET_VEHICLE_MASTER);
+  const carMaster = {}; // carNo -> {office, doorNo}
+  if (vSheet) {
+    const vData = vSheet.getDataRange().getValues();
+    const headers = vData.shift();
+    const idxCar = headers.findIndex(h => h.includes("車番"));
+    const idxDoor = headers.findIndex(h => h.includes("ドア"));
+    const idxOffice = headers.findIndex(h => h.includes("営業所") || h.includes("区"));
+    
+    if (idxCar !== -1) {
+      vData.forEach(row => {
+        const carNo = String(row[idxCar]).trim();
+        if (carNo) {
+          carMaster[carNo] = {
+            office: (idxOffice !== -1) ? String(row[idxOffice]).trim() : "所属不明",
+            doorNo: (idxDoor !== -1) ? String(row[idxDoor]).trim() : "-"
+          };
+        }
+      });
+    }
+  }
+
+  // 2. 月次データ(メーター)
+  const meterMap = {};
+  const mSheet = ss.getSheetByName(SHEET_MONTHLY_DATA);
+  if (mSheet) {
+    const mData = mSheet.getDataRange().getValues();
+    const headers = mData.shift();
+    const idxYm = headers.indexOf("年月");
+    const idxCar = headers.indexOf("車両番号");
+    const idxMeter = headers.indexOf("月末メーター");
+    if (idxYm !== -1 && idxCar !== -1 && idxMeter !== -1) {
+      mData.forEach(row => {
+        if(!row[idxYm]) return;
+        const ym = Utilities.formatDate(new Date(row[idxYm]), "Asia/Tokyo", "yyyy-MM");
+        const car = String(row[idxCar]).trim();
+        const meter = Number(row[idxMeter]);
+        if (ym && car) meterMap[`${ym}_${car}`] = meter;
+      });
+    }
+  }
+
+  // 3. 給油実績
+  const rSheet = ss.getSheetByName(SHEET_RECEIPT);
+  if (!rSheet) return { error: "給油実績データがありません" };
+  const rData = rSheet.getDataRange().getValues();
+  const rHeaders = rData.shift();
   
-  if (responseCode === 200) {
-    const jsonResponse = JSON.parse(response.getContentText());
-    return jsonResponse.candidates[0].content.parts[0].text;
+  const idxDate = rHeaders.indexOf("給油日");
+  const idxCar = rHeaders.indexOf("車両番号");
+  const idxQty = rHeaders.indexOf("数量");
+  const idxOffice = rHeaders.indexOf("営業所"); 
+  const idxDoor = rHeaders.indexOf("ドア板");
+
+  if (idxDate === -1 || idxCar === -1 || idxQty === -1) {
+    return { error: "給油実績シートに必要な列(給油日/車両番号/数量)がありません" };
+  }
+
+  const monthlyData = {};
+  const allMonths = new Set();
+
+  rData.forEach(row => {
+    const dVal = row[idxDate];
+    if (!dVal) return;
+    const date = new Date(dVal);
+    const yyyymm = Utilities.formatDate(date, "Asia/Tokyo", "yyyy-MM");
+    const day = date.getDate();
+    const carNo = String(row[idxCar]).trim();
+    const qty = Number(row[idxQty]) || 0;
+    
+    // マスタ情報で補完
+    let office = (idxOffice !== -1) ? String(row[idxOffice]).trim() : "";
+    let doorNo = (idxDoor !== -1) ? String(row[idxDoor]).trim() : "";
+    
+    if (carMaster[carNo]) {
+      if (!office || office === "所属不明") office = carMaster[carNo].office;
+      if (!doorNo || doorNo === "-") doorNo = carMaster[carNo].doorNo;
+    }
+    
+    if (!office) office = "所属不明";
+    if (!doorNo) doorNo = "-";
+
+    allMonths.add(yyyymm);
+
+    if (!monthlyData[yyyymm]) monthlyData[yyyymm] = {};
+    if (!monthlyData[yyyymm][carNo]) {
+      monthlyData[yyyymm][carNo] = { totalQty: 0, office: office, doorNo: doorNo, days: {} };
+    }
+    
+    monthlyData[yyyymm][carNo].totalQty += qty;
+    if (!monthlyData[yyyymm][carNo].days[day]) monthlyData[yyyymm][carNo].days[day] = 0;
+    monthlyData[yyyymm][carNo].days[day] += qty;
+  });
+
+  // 4. 集計
+  const result = {}; 
+  const sortedMonths = Array.from(allMonths).sort().reverse();
+  
+  sortedMonths.forEach(ym => {
+    result[ym] = {};
+    const carsInMonth = monthlyData[ym];
+    Object.keys(carsInMonth).forEach(carNo => {
+      const data = carsInMonth[carNo];
+      const office = data.office;
+      
+      const currMeter = meterMap[`${ym}_${carNo}`] || 0;
+      const currDate = new Date(ym + "-01");
+      const prevDate = new Date(currDate.getFullYear(), currDate.getMonth() - 1, 1);
+      const prevYm = Utilities.formatDate(prevDate, "Asia/Tokyo", "yyyy-MM");
+      const prevMeter = meterMap[`${prevYm}_${carNo}`] || 0;
+
+      let dist = 0;
+      let mpg = 0;
+      if (currMeter > 0 && prevMeter > 0) {
+        dist = currMeter - prevMeter;
+        if (dist > 0 && data.totalQty > 0) mpg = dist / data.totalQty;
+      }
+
+      if (!result[ym][office]) result[ym][office] = [];
+      result[ym][office].push({
+        carNo, doorNo: data.doorNo,
+        totalQty: data.totalQty, currMeter, prevMeter, dist, mpg, days: data.days
+      });
+    });
+  });
+
+  return { stats: result, months: sortedMonths };
+}
+
+function saveMonthlyMeter(yyyymm, carNo, meterVal) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(SHEET_MONTHLY_DATA);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEET_MONTHLY_DATA);
+    sheet.appendRow(["ID", "年月", "車両番号", "月末メーター", "更新日時"]);
+  }
+  const id = `${yyyymm}_${carNo}`;
+  const data = sheet.getDataRange().getValues();
+  let rowIndex = -1;
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === id) { rowIndex = i + 1; break; }
+  }
+  const timestamp = new Date();
+  if (rowIndex > 0) {
+    sheet.getRange(rowIndex, 4).setValue(meterVal);
+    sheet.getRange(rowIndex, 5).setValue(timestamp);
   } else {
-    throw new Error(`APIリクエスト失敗: ${responseCode} ${response.getContentText()}`);
+    sheet.appendRow([id, yyyymm, carNo, meterVal, timestamp]);
+  }
+  return { success: true };
+}
+
+function analyzeReceipt(imageData) {
+  const prompt = `
+    あなたはガソリンスタンドのレシート読取のプロです。
+    画像から以下の情報を抽出し、JSONのみを返してください。
+    【JSONキー】
+    - date: "YYYY-MM-DD"
+    - company: "店舗名"
+    - product: "軽油" | "レギュラー" | "ハイオク" | "その他"
+    - quantity: 数値(L)
+    ※余計なMarkdownは不要。
+  `;
+  try {
+    const contents = [{ parts: [{ text: prompt }, { inline_data: { mime_type: imageData.mimeType, data: imageData.base64 } }] }];
+    const jsonStr = callGemini(contents, MODEL_RECEIPT);
+    const match = jsonStr.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error("JSONが見つかりませんでした");
+    return JSON.parse(match[0]);
+  } catch (e) {
+    throw new Error("レシート解析エラー: " + e.message);
   }
 }
 
-/**
- * データ保存処理
- */
-function saveAllData(allResults) {
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    
-    const parentSheet = ss.getSheetByName(SHEET_DATA_PARENT);
-    const parentSheetHeaders = parentSheet.getRange(1, 1, 1, parentSheet.getLastColumn()).getValues()[0];
-
-    const childSheet = ss.getSheetByName(SHEET_DATA_CHILD);
-    const childSheetHeaders = childSheet.getRange(1, 1, 1, childSheet.getLastColumn()).getValues()[0];
-
-    const parentRowsToAppend = [];
-    const childRowsToAppend = [];
-
-    const rootFolder = DriveApp.getRootFolder(); 
-
-    allResults.forEach(record => {
-      const { extractedData, allImagesData, fileName } = record;
-      
-      const parentData = extractedData.parent || {};
-      const childData = extractedData.child || [];
-      const invoiceId = Utilities.getUuid();
-
-      // --- 1. フォルダ作成ロジック (企業名特定ロジック強化) ---
-      let companyName = "";
-
-      // (A) キー名から探す ("取引先", "請求元" などを優先)
-      const keyKeywords = ["取引先", "請求元", "請求先", "相手先", "企業", "会社", "店舗", "店名"];
-      for (const kw of keyKeywords) {
-        const foundKey = Object.keys(parentData).find(k => k.includes(kw) && parentData[k]);
-        if (foundKey) {
-          companyName = parentData[foundKey];
-          break;
-        }
-      }
-
-      // (B) 値から「株式会社」などを探す（フォールバック）
-      if (!companyName) {
-        const valueKeywords = ["株式会社", "有限会社", "合同会社", "(株)", "(有)"];
-        for (const key in parentData) {
-          const val = String(parentData[key]);
-          if (valueKeywords.some(vk => val.includes(vk))) {
-            companyName = val;
-            break;
-          }
-        }
-      }
-
-      // (C) それでもなければ「不明な企業」
-      if (!companyName) companyName = "不明な企業";
-
-      // 日付は「今日(Today)」を使用し yyyy/MM/dd 形式にする
-      const today = new Date();
-      const formattedDate = Utilities.formatDate(today, "Asia/Tokyo", "yyyy/MM/dd");
-
-      // ★ フォルダ名: 取引先_yyyy/MM/dd
-      const folderName = `${companyName}_${formattedDate}`;
-
-      // フォルダ作成
-      const newFolder = rootFolder.createFolder(folderName);
-      const folderUrl = newFolder.getUrl();
-
-      // --- 2. ファイルをフォルダに保存 ---
-      if (allImagesData && Array.isArray(allImagesData)) {
-        allImagesData.forEach((img, idx) => {
-          const blob = Utilities.newBlob(Utilities.base64Decode(img.base64), img.mimeType, img.fileName || `file_${idx + 1}`);
-          newFolder.createFile(blob);
-        });
-      } else {
-        newFolder.createFile("error.txt", "画像データが見つかりませんでした。");
-      }
-
-      // --- 3. スプレッドシート用データ作成 ---
-      const newParentRow = parentSheetHeaders.map(header => {
-        if (header === 'InvoiceID') return invoiceId;
-        if (header.includes("リンク")) return folderUrl;
-        if (header === '保存日時') return new Date();
-        return parentData[header] || "";
-      });
-      
-      const newChildRows = childData.map(childRecord => {
-        return childSheetHeaders.map(header => {
-          if (header === 'InvoiceID') return invoiceId;
-          if (header === 'LineItemID') return Utilities.getUuid();
-          return childRecord[header] || "";
-        });
-      });
-
-      parentRowsToAppend.push(newParentRow);
-      childRowsToAppend.push(...newChildRows);
-    });
-
-    if (parentRowsToAppend.length > 0) {
-      parentSheet.getRange(parentSheet.getLastRow() + 1, 1, parentRowsToAppend.length, parentSheetHeaders.length)
-        .setValues(parentRowsToAppend);
-    }
-    if (childRowsToAppend.length > 0) {
-      childSheet.getRange(childSheet.getLastRow() + 1, 1, childRowsToAppend.length, childSheetHeaders.length)
-        .setValues(childRowsToAppend);
-    }
-
-    return { status: "success", message: `${parentRowsToAppend.length}件のデータを保存しました。\nフォルダ: ${parentRowsToAppend[0] ? parentRowsToAppend[0][1] : ''} など` };
-
-  } catch (e) {
-    Logger.log(e);
-    return { error: `保存に失敗しました: ${e.message}` };
+function saveReceiptData(data) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(SHEET_RECEIPT);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEET_RECEIPT);
+    sheet.appendRow(["実績ID", "給油日", "営業所", "ドア板", "車両番号", "レシート", "企業名", "商品名", "数量"]);
   }
+
+  const officeName = getCurrentUserOffice();
+  const inputDoorNo = String(data.carNo).trim();
+  let realCarNo = ""; 
+  
+  const vSheet = ss.getSheetByName(SHEET_VEHICLE_MASTER);
+  if (vSheet) {
+    const vData = vSheet.getDataRange().getValues();
+    const headers = vData.shift(); 
+    const idxCar = headers.findIndex(h => h.includes("車番"));
+    const idxDoor = headers.findIndex(h => h.includes("ドア"));
+    if (idxDoor !== -1 && idxCar !== -1) {
+      for (const row of vData) {
+        if (String(row[idxDoor]).trim() === inputDoorNo) {
+          realCarNo = String(row[idxCar]).trim(); 
+          break; 
+        }
+      }
+    }
+  }
+  if (!realCarNo) realCarNo = inputDoorNo; 
+
+  const props = PropertiesService.getScriptProperties();
+  const targetFolderId = props.getProperty(PROP_RECEIPT_FOLDER_ID); // レシート用フォルダIDを使用
+  let parentFolder = targetFolderId ? tryGetFolder(targetFolderId) : DriveApp.getRootFolder();
+  const folderName = `レシート_${Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyyMM")}`;
+  const folders = parentFolder.getFoldersByName(folderName);
+  let folder = folders.hasNext() ? folders.next() : parentFolder.createFolder(folderName);
+  
+  const blob = Utilities.newBlob(Utilities.base64Decode(data.imageData.base64), data.imageData.mimeType, `receipt_${data.date}_${Utilities.getUuid()}.jpg`);
+  const file = folder.createFile(blob);
+  const id = Utilities.getUuid();
+  
+  sheet.appendRow([
+    id, data.date, officeName, inputDoorNo, realCarNo, file.getUrl(), data.company, data.product, data.quantity
+  ]);
+  return { success: true };
+}
+
+// ---------------------------------------------------------
+//  ★PCモード (請求書一括 & 結合) 機能
+// ---------------------------------------------------------
+
+/**
+ * 車両マスタを読み込み、登録番号から車番への逆引きマップを作成
+ * @returns {{[key: string]: string}} 登録番号(正規化) -> 車番
+ */
+function getVehicleLookupMap() {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const vSheet = ss.getSheetByName(SHEET_VEHICLE_MASTER);
+    const lookupMap = {};
+
+    if (!vSheet) return lookupMap;
+
+    const vData = vSheet.getDataRange().getValues();
+    const headers = vData.shift();
+    
+    const idxCar = headers.findIndex(h => h.includes("車番"));
+    const idxReg = headers.findIndex(h => h.includes("登録番号"));
+
+    if (idxCar === -1 || idxReg === -1) {
+        Logger.log("Vehicle Master Error: '車番' or '登録番号' column missing.");
+        return lookupMap;
+    }
+
+    vData.forEach(row => {
+        const regNo = String(row[idxReg]).trim();
+        const carNo = String(row[idxCar]).trim();
+        if (regNo && carNo) {
+            // 登録番号の表記を正規化してキーにする
+            const normalizedRegNo = normalizeCarNo(regNo);
+            if (normalizedRegNo) {
+                lookupMap[normalizedRegNo] = carNo;
+            }
+        }
+    });
+    return lookupMap;
+}
+
+
+function runInvoiceOcr(fileGroups) {
+  try {
+    const vehicleLookupMap = getVehicleLookupMap(); // マスタマップを事前取得
+    const results = [];
+
+    for (const group of fileGroups) {
+      const promptText = `
+        あなたは請求書処理のプロフェッショナルです。
+        提供された画像（複数枚ある場合は結合して1つの請求書として扱ってください）から、以下の情報を抽出してください。
+        
+        # 抽出ルール
+        1. **取引先名 (vendorName):** 「株式会社河野」という名前は**絶対に抽出しないでください**。それ以外の企業名（請求元、ガソリンスタンド名など）を抽出してください。
+        2. **車両情報 (carNo):** 記載されている「車両番号」「車番」「登録番号」など、車両を特定できる情報をそのまま抽出してください。
+        3. **総額 (totalAmount):** 最終的な総額はAIで抽出せず、子明細の合計金額をGAS側で計算して補正します。ダミー値(0)をセットしてください。
+        4. **金額 (amount):** 明細の単価と数量を抽出できれば、金額はAIで抽出する必要はありません。ダミー値(0)をセットしてください。
+        
+        # 出力フォーマット (JSON)
+        {
+          "parent": {
+            "invoiceNumber": "請求書番号", "date": "請求日 (YYYY-MM-DD)", "vendorName": "請求元企業名", "totalAmount": 0
+          },
+          "child": [
+            { "date": "利用日 (YYYY-MM-DD)", "itemName": "品名", "quantity": 数値, "unitPrice": 数値, "amount": 0, "carNo": "車両情報" }, ...
+          ]
+        }
+        ※JSONのみ出力。
+      `;
+      const parts = [{ text: promptText }];
+      group.files.forEach(f => {
+        parts.push({ inline_data: { mime_type: f.mimeType, data: f.base64 } });
+      });
+      const contents = [{ parts: parts }];
+      const jsonStr = callGemini(contents, MODEL_INVOICE);
+      const match = jsonStr.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error("JSON抽出失敗");
+      
+      const parsedData = JSON.parse(match[0]);
+      
+      // ★ 抽出後のデータ後処理 (金額計算 & 車番補正)
+      let calculatedTotal = 0;
+      if (Array.isArray(parsedData.child)) {
+        parsedData.child = parsedData.child.map(row => {
+          const qty = Number(row.quantity) || 0;
+          const unitPrice = Number(row.unitPrice) || 0;
+          
+          // 1. 金額は (数量 * 単価) で再計算
+          row.amount = Math.round(qty * unitPrice * 100) / 100;
+          calculatedTotal += row.amount;
+          
+          // 2. ★ 登録番号から車番へ補正
+          const extractedCarNo = String(row.carNo || '').trim();
+          const normalizedExtractedCarNo = normalizeCarNo(extractedCarNo);
+          
+          if (vehicleLookupMap[normalizedExtractedCarNo]) {
+              // マスタに一致する登録番号があれば、車番で上書き
+              row.carNo = vehicleLookupMap[normalizedExtractedCarNo];
+              Logger.log(`補正成功: Extracted: ${extractedCarNo} -> Corrected CarNo: ${row.carNo}`);
+          } else {
+              // 補正できなかった場合も、AIが抽出した元の情報を表示に残す
+              row.carNo = extractedCarNo; 
+          }
+
+          return row;
+        });
+      }
+      
+      // 総額は子明細の合計で上書き
+      parsedData.parent.totalAmount = Math.round(calculatedTotal);
+
+      results.push({ fileName: group.files.map(f => f.name).join(', '), data: parsedData });
+    }
+    return results;
+  } catch (e) {
+    Logger.log("Invoice OCR Error: " + e.message);
+    throw new Error("請求書解析エラー: " + e.message);
+  }
+}
+
+function saveInvoiceData(invoiceList) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // 親シート準備
+  let pSheet = ss.getSheetByName(SHEET_INVOICE_PARENT);
+  if (!pSheet) {
+    pSheet = ss.insertSheet(SHEET_INVOICE_PARENT);
+    pSheet.appendRow(["InvoiceID", "画像リンク", "取引先名", "営業所名", "日時", "総額", "請求書番号"]); // 列順をユーザー指定に修正
+  }
+  // 子シート準備
+  let cSheet = ss.getSheetByName(SHEET_INVOICE_CHILD);
+  if (!cSheet) {
+    cSheet = ss.insertSheet(SHEET_INVOICE_CHILD);
+    // ★指定のヘッダー順でシートを作成
+    cSheet.appendRow(["LineItemID", "InvoiceID", "日付", "車両番号", "商品名", "数量", "単価", "金額"]);
+  }
+
+  const pRows = [];
+  const cRows = [];
+  const timestamp = new Date();
+  
+  const props = PropertiesService.getScriptProperties();
+  const targetFolderId = props.getProperty(PROP_INVOICE_FOLDER_ID); // ★請求書用フォルダIDを使用
+  let parentFolder = targetFolderId ? tryGetFolder(targetFolderId) : DriveApp.getRootFolder();
+  const folderName = `請求書_${Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyyMM")}`;
+  const folders = parentFolder.getFoldersByName(folderName);
+  let folder = folders.hasNext() ? folders.next() : parentFolder.createFolder(folderName);
+
+  invoiceList.forEach(item => {
+    const pData = item.data.parent || {};
+    const cData = item.data.child || [];
+    const invoiceId = Utilities.getUuid();
+    
+    // 1. ファイルをフォルダに保存し、画像リンクを取得
+    let fileUrl = "";
+
+    // 親データ (InvoiceID, 画像リンク, 取引先名, 営業所名, 日時, 総額, 請求書番号)
+    pRows.push([
+      invoiceId, 
+      fileUrl, // 暫定的に空
+      pData.vendorName || "", 
+      getCurrentUserOffice(), // ログインユーザーの営業所名を記録
+      pData.date || "", 
+      pData.totalAmount || 0,
+      pData.invoiceNumber || ""
+    ]);
+
+    // 子データ (LineItemID, InvoiceID, 日付, 車両番号, 商品名, 数量, 単価, 金額)
+    cData.forEach(row => {
+      // ★指定の列順に合わせてデータを格納
+      cRows.push([
+        Utilities.getUuid(), 
+        invoiceId, 
+        row.date || "",            // 日付
+        row.carNo || "",           // 車両番号 (補正後の車番)
+        row.itemName || "",        // 商品名 (AIからはitemNameで取得)
+        row.quantity || 0,         // 数量
+        row.unitPrice || 0,        // 単価
+        row.amount || 0            // 金額 (GASで再計算された値)
+      ]);
+    });
+  });
+
+  if (pRows.length > 0) pSheet.getRange(pSheet.getLastRow() + 1, 1, pRows.length, pRows[0].length).setValues(pRows);
+  if (cRows.length > 0) cSheet.getRange(cSheet.getLastRow() + 1, 1, cRows.length, cRows[0].length).setValues(cRows);
+
+  return { success: true, count: pRows.length };
 }
