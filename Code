@@ -49,13 +49,29 @@ function normalizeCarNo(carNo) {
 
 /**
  * 日付を YYYY-MM-DD 形式に整形
- * @param {Date|string} dateValue 
+ * - Dateオブジェクト、Excel日付シリアル値、または 'YYYY/MM/DD' 形式の文字列に対応
+ * @param {Date|string|number} dateValue 
  * @returns {string|null}
  */
 function formatDateKey(dateValue) {
   if (!dateValue) return null;
-  const dateObj = (dateValue instanceof Date) ? dateValue : new Date(dateValue);
+  let dateObj;
+  
+  if (dateValue instanceof Date) {
+    dateObj = dateValue;
+  } else if (typeof dateValue === 'number') {
+    // Excelシリアル値をDateオブジェクトに変換
+    // スプレッドシートからの数値はシリアル値と想定
+    const ms = (dateValue - 25569) * 86400 * 1000;
+    dateObj = new Date(ms);
+  } else {
+    // 文字列の場合、スラッシュをハイフンに置換してパースを安定化
+    let dateStr = String(dateValue).trim().replace(/\//g, '-');
+    dateObj = new Date(dateStr);
+  }
+  
   if (isNaN(dateObj.getTime())) return null;
+  // JSTでフォーマット
   return Utilities.formatDate(dateObj, "Asia/Tokyo", "yyyy-MM-dd");
 }
 
@@ -144,8 +160,9 @@ function getInvoiceDetailsAndReconciliation(invoiceId) {
         
         // 照合用マップの更新
         const key = `${item.date}_${normalizeCarNo(item.carNo)}`;
+        Logger.log(`[INVOICE Key] Key: ${key}, Qty: ${item.quantity}`);
         if (!invoiceMap[key]) {
-            invoiceMap[key] = { date: item.date, carNo: item.carNo, invoiceQty: 0, receiptQty: 0 };
+            invoiceMap[key] = { date: item.date, carNo: item.carNo, invoiceQty: 0, receiptQty: 0, receiptUrl: null }; // ★receiptUrlを追加
         }
         invoiceMap[key].invoiceQty += item.quantity;
     });
@@ -154,8 +171,9 @@ function getInvoiceDetailsAndReconciliation(invoiceId) {
     const rData = rSheet.getDataRange().getValues();
     const rHeaders = rData.shift();
     const rIdxDate = rHeaders.indexOf("給油日");
-    const rIdxCar = rHeaders.indexOf("車両番号");
+    const rIdxCar = rHeaders.indexOf("車両番号"); // A_給油実績シートでは車両番号でデータが入っている
     const rIdxQty = rHeaders.indexOf("数量");
+    const rIdxUrl = rHeaders.indexOf("レシート"); // ★レシートURLのインデックスを取得
 
     const targetYm = invoiceDetails.length > 0 ? formatDateKey(invoiceDetails[0][cIdxDate]).substring(0, 7) : null;
 
@@ -163,23 +181,35 @@ function getInvoiceDetailsAndReconciliation(invoiceId) {
         const date = formatDateKey(row[rIdxDate]);
         const carNo = String(row[rIdxCar]);
         const qty = Number(row[rIdxQty]) || 0;
+        const url = (rIdxUrl !== -1) ? String(row[rIdxUrl]) : null; // ★URLを取得
         
         if (!date || !carNo || date.substring(0, 7) !== targetYm) return;
         
         const key = `${date}_${normalizeCarNo(carNo)}`;
+        Logger.log(`[RECEIPT Key] Key: ${key}, Qty: ${qty}`);
 
         if (!invoiceMap[key]) {
             // 請求書にはないが、レシートに存在するデータ
-            invoiceMap[key] = { date: date, carNo: carNo, invoiceQty: 0, receiptQty: 0 };
+            invoiceMap[key] = { date: date, carNo: carNo, invoiceQty: 0, receiptQty: 0, receiptUrl: null };
         }
         invoiceMap[key].receiptQty += qty;
+        
+        // ★レシートURLは、複数のレシートがあっても最新のものを採用する（簡易対応）
+        if (url && url.startsWith('http')) {
+            invoiceMap[key].receiptUrl = url;
+        }
     });
 
     // 3. 照合判定と配列化
     const reconciliationList = Object.values(invoiceMap).map(item => {
+        // 数量は小数点以下2桁で丸めて誤差を吸収
+        item.receiptQty = Math.round(item.receiptQty * 100) / 100;
+        item.invoiceQty = Math.round(item.invoiceQty * 100) / 100;
+        
         item.diff = Math.round((item.receiptQty - item.invoiceQty) * 100) / 100;
 
         if (item.receiptQty > 0 && item.invoiceQty > 0) {
+            // 数量の絶対値の差が0.1L未満をOKとする
             if (Math.abs(item.diff) < 0.1) {
                 item.status = "OK";
             } else {
@@ -220,10 +250,11 @@ function getReconciliationViewData(yyyymm) {
     
     // ヘッダーからのインデックス再確認（シートの列順が固定でない場合に備える）
     const idxDate = headers.indexOf(dateIndex);
-    const carHeader = (sheetName === SHEET_RECEIPT) ? "車両番号" : "車両情報";
+    const carHeader = (sheetName === SHEET_RECEIPT) ? "車両番号" : "車両番号"; // "車両情報" -> "車両番号" に修正 (請求書_子に合わせる)
     const idxCar = headers.findIndex(h => h.includes(carHeader)); 
     const idxQty = headers.indexOf(qtyIndex);
-
+    const idxUrl = headers.indexOf("レシート"); // レシートURLのインデックスを取得
+    
     if (idxDate === -1 || idxCar === -1 || idxQty === -1) {
       Logger.log(`Error: Sheet ${sheetName} missing columns: ${dateIndex}, ${carHeader}, ${qtyIndex}`);
       return;
@@ -234,6 +265,7 @@ function getReconciliationViewData(yyyymm) {
       const carNo = String(row[idxCar]);
       const normalizedCarNo = normalizeCarNo(carNo);
       const qty = Number(row[idxQty]) || 0;
+      const url = isReceipt && (idxUrl !== -1) ? String(row[idxUrl]) : null;
       
       if (!dateKey || !normalizedCarNo) return;
       if (!dateKey.startsWith(yyyymm)) return;
@@ -247,12 +279,17 @@ function getReconciliationViewData(yyyymm) {
           receiptQty: 0,
           invoiceQty: 0,
           diff: 0,
-          status: ""
+          status: "",
+          receiptUrl: null // ★receiptUrlを追加
         };
       }
       
       if (isReceipt) {
         dataMap[key].receiptQty += qty;
+        // URLは最新のものを上書き（簡易対応）
+        if (url && url.startsWith('http')) {
+            dataMap[key].receiptUrl = url;
+        }
       } else {
         dataMap[key].invoiceQty += qty;
       }
@@ -263,10 +300,14 @@ function getReconciliationViewData(yyyymm) {
   processData(SHEET_RECEIPT, "数量", "車両番号", "給油日", true); 
 
   // 2. 請求書データ (請求データ_子) の集計
-  processData(SHEET_INVOICE_CHILD, "数量", "車両情報", "日付", false);
+  processData(SHEET_INVOICE_CHILD, "数量", "車両番号", "日付", false);
 
   // 3. 照合判定 & 配列化
   const resultList = Object.values(dataMap).map(item => {
+    // 小数点以下2桁で丸める処理をここにも追加し、浮動小数点の誤差を防ぐ
+    item.receiptQty = Math.round(item.receiptQty * 100) / 100;
+    item.invoiceQty = Math.round(item.invoiceQty * 100) / 100;
+
     item.diff = Math.round((item.receiptQty - item.invoiceQty) * 100) / 100;
     
     if (item.receiptQty > 0 && item.invoiceQty > 0) {
@@ -728,7 +769,8 @@ function saveInvoiceData(invoiceList) {
   const timestamp = new Date();
   
   const props = PropertiesService.getScriptProperties();
-  const targetFolderId = props.getProperty(PROP_INVOICE_FOLDER_ID); // ★請求書用フォルダIDを使用
+  // ★重要：請求書用のフォルダIDを参照
+  const targetFolderId = props.getProperty(PROP_INVOICE_FOLDER_ID); 
   let parentFolder = targetFolderId ? tryGetFolder(targetFolderId) : DriveApp.getRootFolder();
   const folderName = `請求書_${Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyyMM")}`;
   const folders = parentFolder.getFoldersByName(folderName);
@@ -740,7 +782,9 @@ function saveInvoiceData(invoiceList) {
     const invoiceId = Utilities.getUuid();
     
     // 1. ファイルをフォルダに保存し、画像リンクを取得
-    let fileUrl = "";
+    // NOTE: 現状、フロントエンドからBase64データが渡されていないため、この部分の処理は保留し、fileUrlは空のままにする。
+    // 画像ファイルを保存するには、フロントエンド側の saveInvoiceData 呼び出しでファイルデータを渡すように修正が必要。
+    let fileUrl = ""; 
 
     // 親データ (InvoiceID, 画像リンク, 取引先名, 営業所名, 日時, 総額, 請求書番号)
     pRows.push([
