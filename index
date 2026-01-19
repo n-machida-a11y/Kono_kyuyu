@@ -1,887 +1,1033 @@
-  <!DOCTYPE html>
-  <html>
-  <head>
-    <base target="_top">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-    <title>統合OCRアプリ</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <title>統合OCRアプリ</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  
+  <style>
+    /* 共通スタイル */
+    :root {
+      --primary: #009688; --primary-dark: #00796B; --secondary: #455A64;
+      --accent: #FF9800; --bg: #F5F5F5; --text: #212121; --header-height: 110px;
+      --status-ok: #4CAF50; --status-ng: #F44336; --status-warn: #FFC107; --status-gray: #9E9E9E;
+    }
+    body { 
+      font-family: "Roboto", sans-serif; background-color: var(--bg); color: var(--text); 
+      margin: 0; padding-top: var(--header-height); 
+    }
     
-    <style>
-      /* 共通スタイル */
-      :root {
-        --primary: #009688; --primary-dark: #00796B; --secondary: #455A64;
-        --accent: #FF9800; --bg: #F5F5F5; --text: #212121; --header-height: 110px;
-        --status-ok: #4CAF50; --status-ng: #F44336; --status-warn: #FFC107; --status-gray: #9E9E9E;
-      }
-      body { 
-        font-family: "Roboto", sans-serif; background-color: var(--bg); color: var(--text); 
-        margin: 0; padding-top: var(--header-height); 
-      }
-      
-      .fixed-header { position: fixed; top: 0; left: 0; width: 100%; z-index: 100; background: white; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-      .app-header { background: var(--primary); color: white; padding: 12px; text-align: center; }
-      .app-header h1 { margin: 0; font-size: 1.2rem; font-weight: 500; }
-      .top-nav { display: flex; justify-content: space-around; background: white; }
-      .nav-item { flex: 1; text-align: center; padding: 12px 0; color: #757575; cursor: pointer; font-size: 0.95rem; font-weight: bold; border-bottom: 3px solid transparent; }
-      .nav-item.active { color: var(--primary); border-bottom-color: var(--primary); }
-      .nav-item .material-icons { font-size: 22px; vertical-align: bottom; margin-right: 4px; }
+    .fixed-header { position: fixed; top: 0; left: 0; width: 100%; z-index: 100; background: white; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .app-header { background: var(--primary); color: white; padding: 12px; text-align: center; }
+    .app-header h1 { margin: 0; font-size: 1.2rem; font-weight: 500; }
+    .top-nav { display: flex; justify-content: space-around; background: white; }
+    .nav-item { flex: 1; text-align: center; padding: 12px 0; color: #757575; cursor: pointer; font-size: 0.95rem; font-weight: bold; border-bottom: 3px solid transparent; }
+    .nav-item.active { color: var(--primary); border-bottom-color: var(--primary); }
+    .nav-item .material-icons { font-size: 22px; vertical-align: bottom; margin-right: 4px; }
 
-      .container { max-width: 1200px; margin: 0 auto; padding: 20px; box-sizing: border-box; }
-      .tab-content { display: none; }
-      .tab-content.active { display: block; animation: fadeIn 0.3s ease; }
-      @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+    .container { max-width: 1200px; margin: 0 auto; padding: 20px; box-sizing: border-box; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; animation: fadeIn 0.3s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 
-      /* --- PC/Invoice Tab UI --- */
-      #pc-view {
-          display: flex;
-          flex-direction: column;
-      }
-      @media (min-width: 900px) {
-          #pc-view {
-              flex-direction: row;
-              height: calc(100vh - var(--header-height) - 40px); /* 画面の高さに合わせる */
-          }
-          #invoice-sidebar {
-              flex: 0 0 300px; /* サイドバーの固定幅 */
-              overflow-y: auto;
-              border-right: 1px solid #ddd;
-              background: #fff;
-              box-shadow: 2px 0 5px rgba(0,0,0,0.05);
-          }
-          #invoice-main-content {
-              flex-grow: 1;
-              overflow-y: auto;
-              padding-left: 20px;
-          }
-      }
-      
-      /* サイドバーリスト */
-      #invoice-sidebar-controls {
-          padding: 15px;
-          border-bottom: 1px solid #ddd;
-      }
+    /* --- PC/Invoice Tab UI --- */
+    #pc-view {
+        display: flex;
+        flex-direction: column;
+    }
+    @media (min-width: 900px) {
+        #pc-view {
+            flex-direction: row;
+            height: calc(100vh - var(--header-height) - 40px); /* 画面の高さに合わせる */
+        }
+        #invoice-sidebar {
+            flex: 0 0 300px; /* サイドバーの固定幅 */
+            overflow-y: auto;
+            border-right: 1px solid #ddd;
+            background: #fff;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.05);
+        }
+        #invoice-main-content {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding-left: 20px;
+        }
+    }
+    
+    /* サイドバーリスト */
+    #invoice-sidebar-controls {
+        padding: 15px;
+        border-bottom: 1px solid #ddd;
+    }
 
-      .invoice-list-item {
-          padding: 15px;
-          border-bottom: 1px solid #eee;
-          cursor: pointer;
-          transition: background-color 0.1s;
-      }
-      .invoice-list-item:hover { background-color: #f0f0f0; }
-      .invoice-list-item.active { background-color: #e3f2fd; border-left: 5px solid var(--primary); padding-left: 10px; }
-      .invoice-list-item .vendor-name { font-weight: bold; font-size: 1rem; color: var(--secondary); }
-      .invoice-list-item .meta-info { font-size: 0.8rem; color: #757575; margin-top: 4px; display: flex; justify-content: space-between; }
-      
-      /* 初期アップロードエリア */
-      .pc-upload-container-inner {
-          padding: 20px;
-          background: white;
-          border-radius: 8px;
-          box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-      }
-      .pc-uploader-full {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          padding: 40px;
-          border: 3px dashed var(--primary);
-          border-radius: 12px;
-          background-color: #e8f5e9;
-          text-align: center;
-          cursor: pointer;
-      }
+    .invoice-list-item {
+        padding: 15px;
+        border-bottom: 1px solid #eee;
+        cursor: pointer;
+        transition: background-color 0.1s;
+    }
+    .invoice-list-item:hover { background-color: #f0f0f0; }
+    .invoice-list-item.active { background-color: #e3f2fd; border-left: 5px solid var(--primary); padding-left: 10px; }
+    .invoice-list-item .vendor-name { font-weight: bold; font-size: 1rem; color: var(--secondary); }
+    .invoice-list-item .meta-info { font-size: 0.8rem; color: #757575; margin-top: 4px; display: flex; justify-content: space-between; }
+    
+    /* 初期アップロードエリア */
+    .pc-upload-container-inner {
+        padding: 20px;
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    .pc-uploader-full {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 40px;
+        border: 3px dashed var(--primary);
+        border-radius: 12px;
+        background-color: #e8f5e9;
+        text-align: center;
+        cursor: pointer;
+    }
 
-      /* ---------------------------------------------------- */
-      /* 既存のPCモードスタイル (編集・明細・照合) */
-      /* ---------------------------------------------------- */
+    /* ---------------------------------------------------- */
+    /* 既存のPCモードスタイル (編集・明細・照合) */
+    /* ---------------------------------------------------- */
 
-      /* PC Mode Result Edit/Reconcile Styles */
-      .invoice-card { 
-        background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; 
-        box-shadow: 0 2px 5px rgba(0,0,0,0.1); border-top: 4px solid var(--secondary);
-      }
-      .invoice-header { display: flex; justify-content: space-between; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 10px; }
-      .invoice-header h3 { margin: 0; color: var(--secondary); }
-      
-      /* タブ切り替え（右側メインコンテンツ用） */
-      .detail-nav { display: flex; margin-bottom: 15px; border-bottom: 1px solid #ddd; }
-      .detail-tab { padding: 10px 15px; cursor: pointer; font-weight: 500; color: #757575; border-bottom: 3px solid transparent; }
-      .detail-tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: bold; }
-      .detail-content { display: none; }
-      .detail-content.active { display: block; }
+    /* PC Mode Result Edit/Reconcile Styles */
+    .invoice-card { 
+      background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; 
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1); border-top: 4px solid var(--secondary);
+    }
+    .invoice-header { display: flex; justify-content: space-between; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 10px; }
+    .invoice-header h3 { margin: 0; color: var(--secondary); }
+    
+    /* タブ切り替え（右側メインコンテンツ用） */
+    .detail-nav { display: flex; margin-bottom: 15px; border-bottom: 1px solid #ddd; }
+    .detail-tab { padding: 10px 15px; cursor: pointer; font-weight: 500; color: #757575; border-bottom: 3px solid transparent; }
+    .detail-tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: bold; }
+    .detail-content { display: none; }
+    .detail-content.active { display: block; }
 
 
-      .invoice-detail-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-          gap: 15px;
-          margin-bottom: 20px;
-      }
-      .parent-item {
-          font-size: 0.9rem;
-      }
-      .parent-item label {
-          display: block;
-          color: #777;
-          margin-bottom: 4px;
-          font-weight: 500;
-      }
-      .parent-item input {
-          width: 100%;
-          padding: 6px;
-          border: 1px solid #ddd;
-          border-radius: 4px;
-          box-sizing: border-box;
-      }
+    .invoice-detail-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+        margin-bottom: 20px;
+    }
+    .parent-item {
+        font-size: 0.9rem;
+    }
+    .parent-item label {
+        display: block;
+        color: #777;
+        margin-bottom: 4px;
+        font-weight: 500;
+    }
+    .parent-item input {
+        width: 100%;
+        padding: 6px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        box-sizing: border-box;
+    }
 
-      table.child-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-top: 10px; }
-      table.child-table th { background: #f5f5f5; padding: 8px; text-align: left; }
-      table.child-table td { border-bottom: 1px solid #eee; padding: 8px; }
-      
-      /* 編集可能セル */
-      table.child-table td[contenteditable="true"] {
-          background-color: #fffde7;
-          border: 1px dashed #ffd700;
-          cursor: text;
-      }
-      table.child-table td:focus {
-          outline: none;
-          box-shadow: 0 0 0 2px var(--accent);
-      }
+    table.child-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-top: 10px; }
+    table.child-table th { background: #f5f5f5; padding: 8px; text-align: left; }
+    table.child-table td { border-bottom: 1px solid #eee; padding: 8px; }
+    
+    /* 編集可能セル */
+    table.child-table td[contenteditable="true"] {
+        background-color: #fffde7;
+        border: 1px dashed #ffd700;
+        cursor: text;
+    }
+    table.child-table td:focus {
+        outline: none;
+        box-shadow: 0 0 0 2px var(--accent);
+    }
 
-      .btn-save-big { width: auto; padding: 10px 30px; background: var(--accent); color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; }
+    .btn-save-big { width: auto; padding: 10px 30px; background: var(--accent); color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; }
 
+    /* ★ フォーム見た目調整のためのスタイルを追加 */
+    .input-group {
+        margin-bottom: 15px; /* グループ間の間隔 */
+    }
+    .input-group label {
+        display: block;
+        font-size: 0.9rem;
+        color: #555;
+        margin-bottom: 5px;
+        font-weight: 500;
+    }
+    .input-group input, .input-group select {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        box-sizing: border-box;
+        font-size: 1rem;
+    }
 
-      /* Other existing styles */
-      .mobile-camera-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--primary); color: white; width: 100%; padding: 50px 0; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.2); cursor: pointer; margin-top: 10px; max-width: 600px; margin-left: auto; margin-right: auto; }
-      .receipt-layout { display: flex; flex-direction: column; gap: 20px; background: white; border-radius: 12px; overflow: hidden; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-      .receipt-img-box { width: 100%; background: #222; text-align: center; position: relative; min-height: 300px; display: flex; align-items: center; justify-content: center; }
-      @media (min-width: 768px) { .receipt-layout { flex-direction: row; align-items: flex-start; } .receipt-img-box { flex: 1; height: 700px; background: #111; } .receipt-img-box img { max-height: 100%; } .receipt-form { flex: 0 0 450px; border-left: 1px solid #eee; height: 700px; overflow-y: auto; } }
-      
-      /* Stats Specific Styles (Restoring/Improving Clarity) */
-      .office-section { margin-bottom: 40px; background: white; box-shadow: 0 4px 10px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }
-      .office-title { 
-          font-size: 1.4rem; /* 大きく */
-          font-weight: bold; 
-          color: var(--secondary); 
-          border-left: 8px solid var(--accent); /* オレンジ色の線 */
-          padding: 15px 20px; 
-          background: #fff; 
-          border-bottom: 2px solid #f0f0f0; 
-      }
-      .table-responsive { overflow-x: auto; padding: 0 10px 10px; } /* 右側にパディングを追加 */
-      table.stats-table { width: 100%; border-collapse: collapse; min-width: 950px; font-size: 1rem; } /* 最小幅を拡大 */
-      .stats-table th, .stats-table td { 
-          padding: 15px 10px; /* パディングを増やす */
-          vertical-align: middle;
-          border-bottom: 1px solid #eee;
-          text-align: center;
-      }
-      .stats-table thead th { 
-          background: #f5f5f5; 
-          color: #555; 
-          font-weight: bold;
-          padding-top: 10px;
-          padding-bottom: 10px;
-      }
-      .col-car { 
-          text-align: left !important; 
-          width: 180px; 
-      }
-      .car-main-info { font-weight: 700; font-size: 1.1rem; color: var(--secondary); }
-      .car-sub-info { font-size: 0.9rem; color: #777; margin-top: 2px; }
+    /* ★ 照合結果テーブルのスタイル修正 (ズレ対策) */
+    .reconcile-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.95rem;
+        table-layout: fixed; /* ★列幅を固定する */
+    }
+    .reconcile-table th, .reconcile-table td {
+        padding: 10px 8px;
+        text-align: center;
+        border: 1px solid #eee; /* わかりやすいように枠線を追加 */
+    }
+    .reconcile-table thead th {
+        background: #f5f5f5;
+        color: var(--secondary);
+        font-weight: bold;
+    }
+    .reconcile-table thead th:nth-child(1) { width: 80px; } /* 日付 */
+    .reconcile-table thead th:nth-child(2) { width: 60px; } /* 車両 */
+    .reconcile-table thead th:nth-child(3) { width: 80px; } /* 請求(L) */
+    .reconcile-table thead th:nth-child(4) { width: 80px; } /* 登録(L) */
+    .reconcile-table thead th:nth-child(5) { width: 80px; } /* 差分 */
+    .reconcile-table thead th:nth-child(6) { width: 100px; } /* 判定 */
+    .reconcile-table thead th:nth-child(7) { width: 70px; }  /* ★画像ボタン列 */
 
-      /* Daily Grid Styles (Calendar Block Look) */
-      .daily-grid {
-          display: grid;
-          grid-template-columns: repeat(7, minmax(40px, 1fr)); /* 1週間7列 */
-          gap: 4px; /* 間隔を広げる */
-          max-width: 350px; 
-          margin: 0 auto; 
-      }
-      .day-cell {
-          padding: 6px 0;
-          font-weight: 500;
-          background: #f5f5f5;
-          color: #666;
-          border-radius: 4px;
-          cursor: pointer;
-          display: flex;
-          flex-direction: column;
-          justify-content: center;
-          align-items: center;
-          min-height: 40px; /* ブロック感を出すために高さ確保 */
-          border: 1px solid #ddd;
-      }
-      .day-cell.has-data {
-          background: var(--primary); /* Teal color */
-          color: white;
-          border-color: var(--primary-dark);
-          box-shadow: 0 2px 4px rgba(0,0,0,0.15);
-      }
-      .day-num { font-size: 0.75rem; line-height: 1; }
-      .day-qty { font-size: 0.9rem; line-height: 1.2; font-weight: bold; margin-top: 2px; }
+    /* 数量と差分の列を右寄せにする */
+    .reconcile-table td:nth-child(3),
+    .reconcile-table td:nth-child(4),
+    .reconcile-table td:nth-child(5) {
+        text-align: right;
+        font-family: 'Consolas', 'Courier New', monospace; /* 数字を見やすく */
+    }
+    
+    /* Other existing styles */
+    .mobile-camera-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--primary); color: white; width: 100%; padding: 50px 0; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.2); cursor: pointer; margin-top: 10px; max-width: 600px; margin-left: auto; margin-right: auto; }
+    .receipt-layout { display: flex; flex-direction: column; gap: 20px; background: white; border-radius: 12px; overflow: hidden; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .receipt-img-box { width: 100%; background: #222; text-align: center; position: relative; min-height: 300px; display: flex; align-items: center; justify-content: center; }
+    /* レシート編集フォームの調整 */
+    .receipt-form { 
+        padding: 20px; /* フォームのパディングを確保 */
+    }
+    @media (min-width: 768px) { 
+        .receipt-layout { flex-direction: row; align-items: flex-start; } 
+        .receipt-img-box { flex: 1; height: 700px; background: #111; } 
+        .receipt-img-box img { max-height: 100%; } 
+        .receipt-form { flex: 0 0 450px; border-left: 1px solid #eee; height: 700px; overflow-y: auto; padding: 20px; /* フォームのパディングを確保 */ } 
+    }
+    
+    /* Stats Specific Styles (Restoring/Improving Clarity) */
+    .office-section { margin-bottom: 40px; background: white; box-shadow: 0 4px 10px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }
+    .office-title { 
+        font-size: 1.4rem; /* 大きく */
+        font-weight: bold; 
+        color: var(--secondary); 
+        border-left: 8px solid var(--accent); /* オレンジ色の線 */
+        padding: 15px 20px; 
+        background: #fff; 
+        border-bottom: 2px solid #f0f0f0; 
+    }
+    .table-responsive { overflow-x: auto; padding: 0 10px 10px; } /* 右側にパディングを追加 */
+    table.stats-table { width: 100%; border-collapse: collapse; min-width: 950px; font-size: 1rem; } /* 最小幅を拡大 */
+    .stats-table th, .stats-table td { 
+        padding: 15px 10px; /* パディングを増やす */
+        vertical-align: middle;
+        border-bottom: 1px solid #eee;
+        text-align: center;
+    }
+    .stats-table thead th { 
+        background: #f5f5f5; 
+        color: #555; 
+        font-weight: bold;
+        padding-top: 10px;
+        padding-bottom: 10px;
+    }
+    .col-car { 
+        text-align: left !important; 
+        width: 180px; 
+    }
+    .car-main-info { font-weight: 700; font-size: 1.1rem; color: var(--secondary); }
+    .car-sub-info { font-size: 0.9rem; color: #777; margin-top: 2px; }
 
-      #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.95); z-index: 1000; display: none; flex-direction: column; align-items: center; justify-content: center; }
-      .spinner { border: 5px solid #eee; border-top: 5px solid var(--primary); border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin-bottom: 20px; }
-      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-      #toast { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.85); color: white; padding: 12px 24px; border-radius: 30px; font-size: 1rem; display: none; z-index: 1100; white-space: nowrap; }
-      .hidden-input { display: none; }
-    </style>
-  </head>
-  <body>
+    /* Daily Grid Styles (Calendar Block Look) */
+    .daily-grid {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(40px, 1fr)); /* 1週間7列 */
+        gap: 4px; /* 間隔を広げる */
+        max-width: 350px; 
+        margin: 0 auto; 
+    }
+    .day-cell {
+        padding: 6px 0;
+        font-weight: 500;
+        background: #f5f5f5;
+        color: #666;
+        border-radius: 4px;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        min-height: 40px; /* ブロック感を出すために高さ確保 */
+        border: 1px solid #ddd;
+    }
+    .day-cell.has-data {
+        background: var(--primary); /* Teal color */
+        color: white;
+        border-color: var(--primary-dark);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+    }
+    .day-num { font-size: 0.75rem; line-height: 1; }
+    .day-qty { font-size: 0.9rem; line-height: 1.2; font-weight: bold; margin-top: 2px; }
 
-    <div class="fixed-header">
-      <header class="app-header"><h1>統合OCRアプリ</h1></header>
-      <nav class="top-nav">
-        <div class="nav-item active" onclick="switchTab('mobile')"><span class="material-icons">receipt_long</span> レシート</div>
-        <div class="nav-item" onclick="switchTab('stats')"><span class="material-icons">analytics</span> 利用実績</div>
-        <div class="nav-item" onclick="switchTab('invoice')"><span class="material-icons">folder_open</span> 請求書</div>
-      </nav>
-    </div>
+    #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.95); z-index: 1000; display: none; flex-direction: column; align-items: center; justify-content: center; }
+    .spinner { border: 5px solid #eee; border-top: 5px solid var(--primary); border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin-bottom: 20px; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    #toast { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.85); color: white; padding: 12px 24px; border-radius: 30px; font-size: 1rem; display: none; z-index: 1100; white-space: nowrap; }
+    .hidden-input { display: none; }
 
-    <div class="container">
+    /* モバイル専用のボタン/フォーム調整 */
+    .retake-btn {
+        position: absolute;
+        bottom: 10px;
+        right: 10px;
+        background: rgba(0, 0, 0, 0.6);
+        color: white;
+        padding: 8px 12px;
+        border-radius: 20px;
+        font-size: 0.9rem;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+    }
+    .retake-btn .material-icons { font-size: 18px; }
+    
+    .btn-image-check {
+        padding: 4px 8px;
+        font-size: 0.75rem;
+        background: var(--primary);
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+        white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
 
-      <!-- TAB 1: Mobile -->
-      <div id="mobile-view" class="tab-content active">
-        <label for="camera-input" class="mobile-camera-btn">
-          <span class="material-icons icon">add_a_photo</span><span style="font-weight:bold; font-size: 1.2rem;">レシートを撮影</span><span style="font-size:0.9rem; margin-top:8px; opacity:0.9;">AIが内容を自動入力します</span>
-        </label>
-        <input type="file" id="camera-input" class="hidden-input" accept="image/*" capture="environment">
-        <div id="mobile-result" style="display:none;">
-          <div class="receipt-layout">
-            <div class="receipt-img-box"><img id="mobile-preview-img" src=""><div class="retake-btn" onclick="document.getElementById('camera-input').click()"><span class="material-icons">camera_alt</span> 撮り直す</div></div>
-            <div class="receipt-form">
-              <div class="input-group"><label>給油日</label><input type="date" id="m-date"></div>
-              <div class="input-group"><label>企業名 (SS名)</label><input type="text" id="m-company"></div>
-              <div class="input-group" style="display:flex; gap:15px;"><div style="flex:1;"><label>商品</label><select id="m-product"><option value="軽油">軽油</option><option value="レギュラー">レギュラー</option><option value="ハイオク">ハイオク</option><option value="AdBlue">AdBlue</option><option value="その他">その他</option></select></div><div style="flex:1;"><label>数量 (L)</label><input type="number" id="m-quantity" step="0.01"></div></div>
-              <div class="input-group"><label>ドア番号 <span style="color:red">*</span></label><input type="tel" id="m-carno" placeholder="ドア番号を入力"></div>
-              <button class="btn-save-big" onclick="submitMobileData()">登録する</button>
-              <div style="text-align:center; margin-top:20px;"><a href="#" onclick="resetMobile(); return false;" style="color:#888;">キャンセル</a></div>
+  <div class="fixed-header">
+    <header class="app-header"><h1>統合OCRアプリ</h1></header>
+    <nav class="top-nav">
+      <div class="nav-item active" onclick="switchTab('mobile')"><span class="material-icons">receipt_long</span> レシート</div>
+      <div class="nav-item" onclick="switchTab('stats')"><span class="material-icons">analytics</span> 利用実績</div>
+      <div class="nav-item" onclick="switchTab('invoice')"><span class="material-icons">folder_open</span> 請求書</div>
+    </nav>
+  </div>
+
+  <div class="container">
+
+    <!-- TAB 1: Mobile -->
+    <div id="mobile-view" class="tab-content active">
+      <label for="camera-input" class="mobile-camera-btn">
+        <span class="material-icons icon">add_a_photo</span><span style="font-weight:bold; font-size: 1.2rem;">レシートを撮影</span><span style="font-size:0.9rem; margin-top:8px; opacity:0.9;">AIが内容を自動入力します</span>
+      </label>
+      <input type="file" id="camera-input" class="hidden-input" accept="image/*" capture="environment">
+      <div id="mobile-result" style="display:none;">
+        <div class="receipt-layout">
+          <div class="receipt-img-box"><img id="mobile-preview-img" src=""><div class="retake-btn" onclick="document.getElementById('camera-input').click()"><span class="material-icons">camera_alt</span> 撮り直す</div></div>
+          <div class="receipt-form">
+            <!-- ★ フォーム見た目調整: input-group スタイルを適用 -->
+            <div class="input-group">
+                <label>給油日</label>
+                <input type="date" id="m-date">
             </div>
+            <div class="input-group">
+                <label>企業名 (SS名)</label>
+                <input type="text" id="m-company">
+            </div>
+            <!-- ★ 商品と数量を横並びにするグループ -->
+            <div style="display:flex; gap:15px;">
+                <div class="input-group" style="flex:1;">
+                    <label>商品</label>
+                    <select id="m-product">
+                        <option value="軽油">軽油</option>
+                        <option value="レギュラー">レギュラー</option>
+                        <option value="ハイオク">ハイオク</option>
+                        <option value="AdBlue">AdBlue</option>
+                        <option value="その他">その他</option>
+                    </select>
+                </div>
+                <div class="input-group" style="flex:1;">
+                    <label>数量 (L)</label>
+                    <input type="number" id="m-quantity" step="0.01">
+                </div>
+            </div>
+            <div class="input-group">
+                <label>ドア番号 <span style="color:red">*</span></label>
+                <input type="tel" id="m-carno" placeholder="ドア番号を入力">
+            </div>
+            <!-- ★ ボタンの見た目を画像に合わせる -->
+            <button class="btn-save-big" style="background:var(--accent);" onclick="submitMobileData()">登録する</button>
+            <div style="text-align:center; margin-top:20px;"><a href="#" onclick="resetMobile(); return false;" style="color:#888;">キャンセル</a></div>
           </div>
         </div>
       </div>
-
-      <!-- TAB 2: Stats -->
-      <div id="stats-view" class="tab-content">
-        <div style="text-align:center; margin-bottom:20px;">
-          <button onclick="loadStats()" style="background:white; border:1px solid #ddd; padding:8px 20px; border-radius:20px; font-size:0.9rem; cursor:pointer; color:#555; display:inline-flex; align-items:center; gap:5px;"><span class="material-icons" style="font-size:18px;">refresh</span> データを更新</button>
-        </div>
-        <div id="month-selector" class="month-selector"></div>
-        <div id="stats-container"><p style="text-align:center; color:#888; margin-top:60px; font-size:1.1rem;">データを読み込んでください</p></div>
-      </div>
-
-      <!-- ★ TAB 3: Invoice (New Flow UI) - 統合 -->
-      <div id="invoice-view" class="tab-content">
-          <div id="pc-view" style="display:none;" class="pc-invoice-flow">
-              <!-- PCモードのフロー全体 (サイドバーとメインコンテンツを内包) -->
-              <div id="invoice-sidebar">
-                  <div id="invoice-sidebar-controls">
-                      <button class="btn-save-big" style="width:100%; padding:10px; font-size:0.9rem; background:var(--secondary);" onclick="showInitialUploadArea()">
-                          <span class="material-icons" style="font-size:18px;">add</span> 新規請求書登録
-                      </button>
-                      <h3 style="margin-top:15px; margin-bottom:5px; font-size:1.1rem;">過去の請求書</h3>
-                  </div>
-                  <ul id="invoice-list-ul" style="list-style: none; padding: 0; margin: 0;">
-                      <li style="text-align:center; padding:20px; color:#888;">読み込み中...</li>
-                  </ul>
-              </div>
-              <div id="invoice-main-content">
-                  <!-- 0. 初期アップロードエリア -->
-                  <div id="invoice-initial-area" class="pc-upload-container-inner">
-                      <h2 style="margin-top:0;">請求書の登録・解析</h2>
-                      <div class="pc-uploader-full" onclick="document.getElementById('pc-file-input').click()">
-                          <span class="material-icons">cloud_upload</span>
-                          <p style="margin:5px 0; font-weight:bold; font-size:1.1rem;">+ ファイルを選択 / D&D</p>
-                          <span style="font-size:0.8rem; color:#666;">PDFや複数画像をまとめて追加できます</span>
-                          <input type="file" id="pc-file-input" class="hidden-input" multiple accept="application/pdf, image/*">
-                      </div>
-                      
-                      <div class="pc-control-bar" style="justify-content: space-between; margin-top:20px; border:none;">
-                          <div style="display:flex; gap:10px;">
-                              <button class="btn-small" onclick="combineSelected()"><span class="material-icons">link</span> 選択を結合</button>
-                              <button class="btn-small" onclick="deleteSelected()"><span class="material-icons">delete</span> 削除</button>
-                          </div>
-                          <button class="btn-save-big" onclick="runInvoiceOcr()"><span class="material-icons">play_arrow</span> 解析開始</button>
-                      </div>
-
-                      <ul id="pc-queue" class="pc-queue-list" style="margin-top:15px; max-height:200px;">
-                          <li style="padding:20px; text-align:center; color:#888;">ファイルがありません</li>
-                      </ul>
-                  </div>
-
-                  <!-- 1. 解析結果・編集エリア (解析ボタン押下後) -->
-                  <div id="pc-result-area" class="pc-result-box" style="display:none;">
-                      <h2>解析結果と編集</h2>
-                      <div id="invoice-results"></div>
-                      <div style="text-align:right; margin-top:30px; border-top: 2px solid #eee; padding-top: 20px;">
-                        <button class="btn-save-big" onclick="saveInvoiceData()">すべて保存</button>
-                      </div>
-                  </div>
-
-                  <!-- 2. 登録済み詳細エリア (サイドバー選択後) -->
-                  <div id="invoice-detail-area" style="display:none;">
-                      <div class="detail-nav">
-                          <div class="detail-tab active" onclick="switchDetailView('details')"><span class="material-icons">list_alt</span> 明細確認</div>
-                          <div class="detail-tab" onclick="switchDetailView('reconcile')"><span class="material-icons">fact_check</span> 照合結果</div>
-                      </div>
-
-                      <div id="detail-view-details" class="detail-content active">
-                          <h3 style="margin-top:0;">明細と親情報</h3>
-                          <div id="selected-invoice-details"></div>
-                      </div>
-
-                      <div id="detail-view-reconcile" class="detail-content">
-                          <h3 style="margin-top:0;">照合結果</h3>
-                          <div class="table-responsive">
-                              <table class="reconcile-table">
-                                  <thead><tr><th>日付</th><th>車両</th><th>請求(L)</th><th>登録(L)</th><th>差分</th><th>判定</th></tr></thead>
-                                  <tbody id="selected-reconcile-tbody"></tbody>
-                              </table>
-                          </div>
-                      </div>
-                  </div>
-
-              </div>
-          </div>
-      </div>
-
     </div>
 
-    <div id="loading-overlay"><div class="spinner"></div><p id="loading-text" style="font-weight:bold; font-size:1.1rem; color:#555;">AIが解析中...</p></div>
-    <div id="toast"></div>
+    <!-- TAB 2: Stats -->
+    <div id="stats-view" class="tab-content">
+      <div style="text-align:center; margin-bottom:20px;">
+        <button onclick="loadStats()" style="background:white; border:1px solid #ddd; padding:8px 20px; border-radius:20px; font-size:0.9rem; cursor:pointer; color:#555; display:inline-flex; align-items:center; gap:5px;"><span class="material-icons" style="font-size:18px;">refresh</span> データを更新</button>
+      </div>
+      <div id="month-selector" class="month-selector"></div>
+      <div id="stats-container"><p style="text-align:center; color:#888; margin-top:60px; font-size:1.1rem;">データを読み込んでください</p></div>
+    </div>
 
-    <script>
-      // --- Global State ---
-      let mobileImageData = null;
-      let allStatsData = null; 
-      let currentYm = ""; 
-      let pcQueue = []; 
-      let pcIdCounter = 1;
-      let invoiceResults = []; // AI解析結果を保持し、編集に使う
-      let registeredInvoiceList = []; // 過去の登録済み請求書リスト
-      let currentSelectedInvoiceId = null; 
-
-      window.onload = () => {
-        document.getElementById('camera-input').addEventListener('change', handleMobileCamera);
-        document.getElementById('pc-file-input').addEventListener('change', handlePcFile);
-        
-        const now = new Date();
-        const defYm = now.getFullYear() + "-" + ('0' + (now.getMonth() + 1)).slice(-2);
-        switchTab('mobile');
-      };
-
-      function switchTab(tabName) {
-        document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-        document.getElementById(tabName + '-view').classList.add('active');
-        const items = document.querySelectorAll('.nav-item');
-        items.forEach(el => el.classList.remove('active'));
-        
-        if(tabName === 'mobile') items[0].classList.add('active');
-        if(tabName === 'stats') { 
-            items[1].classList.add('active'); 
-            if(!allStatsData) loadStats(); 
-        }
-        if(tabName === 'invoice') { // ★請求書タブの処理
-            items[2].classList.add('active'); 
-            // 画面サイズに応じて表示を切り替え
-            document.getElementById('pc-view').style.display = 'flex';
-            loadInvoiceList();
-            // 初期表示: 過去の請求書リストが表示される（リストをクリックすると詳細）
-            showInitialUploadArea();
-        }
-      }
-
-      // --- Invoice Flow: 0. Initial View Reset ---
-      function showInitialUploadArea() {
-          // 全て非表示にして、アップロードエリアのみ表示
-          document.getElementById('invoice-detail-area').style.display = 'none';
-          document.getElementById('pc-result-area').style.display = 'none';
-          document.getElementById('invoice-initial-area').style.display = 'block';
-          
-          // 選択状態をリセット
-          document.querySelectorAll('.invoice-list-item').forEach(el => el.classList.remove('active'));
-          currentSelectedInvoiceId = null;
-      }
-
-
-      // --- Invoice Flow: 1. Sidebar List Management ---
-
-      function loadInvoiceList() {
-          showLoading(true, "請求書リスト取得中...");
-          google.script.run
-              .withSuccessHandler(data => {
-                  showLoading(false);
-                  if (data.error) {
-                      document.getElementById('invoice-list-ul').innerHTML = `<li style="text-align:center; padding:15px; color:red;">${data.error}</li>`;
-                      return;
-                  }
-                  registeredInvoiceList = data.list;
-                  renderInvoiceList(data.list);
-              })
-              .withFailureHandler(e => {
-                  showLoading(false);
-                  document.getElementById('invoice-list-ul').innerHTML = '<li style="text-align:center; padding:15px; color:red;">リスト取得エラー</li>';
-              })
-              .getInvoiceList();
-      }
-      
-      function renderInvoiceList(list) {
-          const ul = document.getElementById('invoice-list-ul');
-          ul.innerHTML = '';
-          if (list.length === 0) {
-              ul.innerHTML = '<li style="text-align:center; padding:15px; color:#888;">登録済みの請求書はありません</li>';
-              return;
-          }
-
-          list.forEach(item => {
-              const li = document.createElement('li');
-              li.className = 'invoice-list-item';
-              li.setAttribute('data-id', item.id);
-              li.onclick = () => selectInvoice(item.id);
-              li.innerHTML = `
-                  <div class="vendor-name">${item.vendor}</div>
-                  <div class="meta-info">
-                      <span>${item.date}</span>
-                      <span>合計: ${item.total}円</span>
-                  </div>
-              `;
-              ul.appendChild(li);
-          });
-      }
-
-      // --- Invoice Flow: 2. Invoice Detail View ---
-
-      function selectInvoice(invoiceId) {
-          currentSelectedInvoiceId = invoiceId;
-          
-          // UIの切り替え
-          document.querySelectorAll('.invoice-list-item').forEach(el => {
-              el.classList.toggle('active', el.getAttribute('data-id') === invoiceId);
-          });
-          document.getElementById('invoice-initial-area').style.display = 'none';
-          document.getElementById('pc-result-area').style.display = 'none';
-          document.getElementById('invoice-detail-area').style.display = 'block';
-          
-          // データのロード
-          showLoading(true, "明細と照合データを取得中...");
-          google.script.run
-              .withSuccessHandler(data => {
-                  showLoading(false);
-                  if (data.error) {
-                      document.getElementById('selected-invoice-details').innerHTML = `<p style="color:red;">${data.error}</p>`;
-                      return;
-                  }
-                  
-                  // 明細確認タブの描画
-                  renderSelectedInvoiceDetails(data.details);
-                  
-                  // 照合結果タブの描画
-                  renderSelectedInvoiceReconciliation(data.reconciliation);
-
-                  // デフォルトで明細タブを表示
-                  switchDetailView('details');
-              })
-              .withFailureHandler(e => {
-                  showLoading(false);
-                  alert("請求書詳細取得エラー: " + e.message);
-              })
-              .getInvoiceDetailsAndReconciliation(invoiceId);
-      }
-      
-      function renderSelectedInvoiceDetails(details) {
-          const container = document.getElementById('selected-invoice-details');
-          container.innerHTML = "";
-          
-          let childHtml = `<table class="child-table"><thead><tr><th>日付</th><th>車両番号</th><th>商品名</th><th>数量(L)</th><th>単価</th><th>金額</th></tr></thead><tbody>`;
-          
-          details.forEach(row => {
-              childHtml += `
-                  <tr>
-                      <td>${row.date || '-'}</td>
-                      <td>${row.carNo || '-'}</td>
-                      <td>${row.itemName || '-'}</td>
-                      <td>${(row.quantity || 0).toFixed(2)}</td>
-                      <td>${(row.unitPrice || 0).toLocaleString()}</td>
-                      <td>${(row.amount || 0).toLocaleString()}</td>
-                  </tr>
-              `;
-          });
-          childHtml += '</tbody></table>';
-          container.innerHTML = childHtml;
-      }
-
-      function renderSelectedInvoiceReconciliation(reconciliation) {
-          const tbody = document.getElementById('selected-reconcile-tbody'); 
-          tbody.innerHTML = '';
-          if (reconciliation.length === 0) { 
-              tbody.innerHTML = '<tr><td colspan="6" style="padding:30px; color:#888;">照合対象データがありません</td></tr>'; 
-              return; 
-          }
-
-          reconciliation.forEach(item => {
-              let statusBadge = '';
-              switch (item.status) {
-                  case 'OK': statusBadge = '<span class="status-badge status-ok">OK</span>'; break;
-                  case 'NG': statusBadge = '<span class="status-badge status-ng">数量不一致</span>'; break;
-                  case 'NO_RECEIPT': statusBadge = '<span class="status-badge status-no-receipt">レシートなし</span>'; break;
-                  case 'NO_INVOICE': statusBadge = '<span class="status-badge status-no-invoice">請求書なし</span>'; break;
-                  default: statusBadge = '<span class="status-badge status-gray">不明</span>'; break;
-              }
-              const diffClass = item.diff > 0 ? 'diff-plus' : (item.diff < 0 ? 'diff-minus' : '');
-              const diffText = item.diff === 0 ? '-' : (item.diff > 0 ? `+${item.diff.toFixed(2)}` : item.diff.toFixed(2));
-              const tr = document.createElement('tr');
-              tr.innerHTML = `
-                  <td>${String(item.date).slice(5)}</td>
-                  <td>${item.carNo}</td>
-                  <td>${item.invoiceQty > 0 ? item.invoiceQty.toFixed(1) : '-'}</td>
-                  <td>${item.receiptQty > 0 ? item.receiptQty.toFixed(1) : '-'}</td>
-                  <td class="diff-cell ${diffClass}">${diffText}</td>
-                  <td>${statusBadge}</td>
-              `;
-              tbody.appendChild(tr);
-          });
-      }
-
-      function switchDetailView(viewName) {
-          document.querySelectorAll('.detail-content').forEach(el => el.classList.remove('active'));
-          document.getElementById('detail-view-' + viewName).classList.add('active');
-          
-          document.querySelectorAll('.detail-tab').forEach(el => el.classList.remove('active'));
-          document.querySelector(`.detail-tab[onclick*='${viewName}']`).classList.add('active');
-      }
-
-      // --- Invoice Flow: 3. Initial Upload & OCR Logic ---
-      
-      function handlePcFile(e) {
-        const files = Array.from(e.target.files);
-        if(files.length === 0) return;
-        files.forEach(f => { pcQueue.push({ id: pcIdCounter++, files: [f], isCombined: false }); });
-        renderPcQueue(); 
-        e.target.value = ""; 
-      }
-      
-      function renderPcQueue() {
-        const l = document.getElementById('pc-queue'); l.innerHTML = "";
-        if(pcQueue.length === 0) { l.innerHTML = '<li style="padding:20px; text-align:center; color:#888;">ファイルがありません</li>'; return; }
-        pcQueue.forEach(i => {
-          const li = document.createElement('li'); 
-          li.className = i.isCombined ? 'pc-queue-item combined' : 'pc-queue-item';
-          let t = i.files[0].name; 
-          let s = `サイズ: ${(i.files.reduce((sum, f) => sum + f.size, 0) / 1024).toFixed(0)}KB`;
-          let icon = i.isCombined ? 'folder_zip' : 'description';
-          
-          if(i.files.length > 1) { 
-              t = `[結合] ${i.files.length}ファイル (${i.files[0].name}...)`;
-              s = `${i.files.length}ファイル合計`; 
-              icon = 'attach_file';
-          }
-          
-          li.innerHTML = `
-            <input type="checkbox" class="q-chk" value="${i.id}">
-            <div class="q-info" style="flex-grow: 1;">
-              <div class="q-name">${t}</div>
-              <div class="q-sub">${s}</div>
+    <!-- ★ TAB 3: Invoice (New Flow UI) - 統合 -->
+    <div id="invoice-view" class="tab-content">
+        <div id="pc-view" style="display:none;" class="pc-invoice-flow">
+            <!-- PCモードのフロー全体 (サイドバーとメインコンテンツを内包) -->
+            <div id="invoice-sidebar">
+                <div id="invoice-sidebar-controls">
+                    <button class="btn-save-big" style="width:100%; padding:10px; font-size:0.9rem; background:var(--secondary);" onclick="showInitialUploadArea()">
+                        <span class="material-icons" style="font-size:18px;">add</span> 新規請求書登録
+                    </button>
+                    <h3 style="margin-top:15px; margin-bottom:5px; font-size:1.1rem;">過去の請求書</h3>
+                </div>
+                <ul id="invoice-list-ul" style="list-style: none; padding: 0; margin: 0;">
+                    <li style="text-align:center; padding:20px; color:#888;">読み込み中...</li>
+                </ul>
             </div>
-            <span class="material-icons" style="color:var(--primary);">${icon}</span>
-          `;
-          l.appendChild(li);
-        });
-      }
+            <div id="invoice-main-content">
+                <!-- 0. 初期アップロードエリア -->
+                <div id="invoice-initial-area" class="pc-upload-container-inner">
+                    <h2 style="margin-top:0;">請求書の登録・解析</h2>
+                    <div class="pc-uploader-full" onclick="document.getElementById('pc-file-input').click()">
+                        <span class="material-icons">cloud_upload</span>
+                        <p style="margin:5px 0; font-weight:bold; font-size:1.1rem;">+ ファイルを選択 / D&D</p>
+                        <span style="font-size:0.8rem; color:#666;">PDFや複数画像をまとめて追加できます</span>
+                        <input type="file" id="pc-file-input" class="hidden-input" multiple accept="application/pdf, image/*">
+                    </div>
+                    
+                    <div class="pc-control-bar" style="justify-content: space-between; margin-top:20px; border:none;">
+                        <div style="display:flex; gap:10px;">
+                            <button class="btn-small" onclick="combineSelected()"><span class="material-icons">link</span> 選択を結合</button>
+                            <button class="btn-small" onclick="deleteSelected()"><span class="material-icons">delete</span> 削除</button>
+                        </div>
+                        <button class="btn-save-big" onclick="runInvoiceOcr()"><span class="material-icons">play_arrow</span> 解析開始</button>
+                    </div>
 
-      function combineSelected(){
-        const c=document.querySelectorAll('.q-chk:checked'); if(c.length<2)return showToast("2つ以上選択してください");
-        const ids=Array.from(c).map(v=>parseInt(v.value));
-        const t=pcQueue.filter(q=>ids.includes(q.id)); const o=pcQueue.filter(q=>!ids.includes(q.id));
-        let m=[]; t.forEach(x=>m=m.concat(x.files));
-        pcQueue=[...o, {id:pcIdCounter++, files:m, isCombined:true}]; renderPcQueue();
-      }
-      function deleteSelected(){
-        const c=document.querySelectorAll('.q-chk:checked'); if(c.length===0)return;
-        const ids=Array.from(c).map(v=>parseInt(v.value)); pcQueue=pcQueue.filter(q=>!ids.includes(q.id)); renderPcQueue();
-      }
+                    <ul id="pc-queue" class="pc-queue-list" style="margin-top:15px; max-height:200px;">
+                        <li style="padding:20px; text-align:center; color:#888;">ファイルがありません</li>
+                    </ul>
+                </div>
 
-      async function runInvoiceOcr() {
-        if(pcQueue.length === 0) return alert("ファイルを追加してください");
-        showLoading(true, "AI解析と照合を実行中...");
-        
-        const payload = [];
-        for(const item of pcQueue) {
-          const fileDataArray = [];
-          for(const f of item.files) {
-            const b64 = await readFileAsBase64(f);
-            fileDataArray.push({ base64: b64, mimeType: f.type, name: f.name });
-          }
-          payload.push({ files: fileDataArray });
-        }
+                <!-- 1. 解析結果・編集エリア (解析ボタン押下後) -->
+                <div id="pc-result-area" class="pc-result-box" style="display:none;">
+                    <h2>解析結果と編集</h2>
+                    <div id="invoice-results"></div>
+                    <div style="text-align:right; margin-top:30px; border-top: 2px solid #eee; padding-top: 20px;">
+                      <button class="btn-save-big" onclick="saveInvoiceData()">すべて保存</button>
+                    </div>
+                </div>
 
-        google.script.run
-          .withSuccessHandler(async results => {
-            invoiceResults = results.map(r => {
-              r.data.child = r.data.child.map(c => ({ ...c, id: Math.random().toString(36).substring(2, 9) }));
-              return r;
-            });
-            
-            await renderInvoiceResults();
-            showLoading(false);
-            // 解析後は編集画面に移動
-            document.getElementById('invoice-detail-area').style.display = 'none';
-            document.getElementById('invoice-initial-area').style.display = 'none';
-            document.getElementById('pc-result-area').style.display = 'block';
+                <!-- 2. 登録済み詳細エリア (サイドバー選択後) -->
+                <div id="invoice-detail-area" style="display:none;">
+                    <div class="detail-nav">
+                        <div class="detail-tab active" onclick="switchDetailView('details')"><span class="material-icons">list_alt</span> 明細確認</div>
+                        <div class="detail-tab" onclick="switchDetailView('reconcile')"><span class="material-icons">fact_check</span> 照合結果</div>
+                    </div>
 
-          })
-          .withFailureHandler(e => {
-            showLoading(false); alert("解析エラー: " + e.message);
-          })
-          .runInvoiceOcr(payload);
-      }
+                    <div id="detail-view-details" class="detail-content active">
+                        <h3 style="margin-top:0;">明細と親情報</h3>
+                        <div id="selected-invoice-details"></div>
+                    </div>
 
-      async function renderInvoiceResults() {
-          const container = document.getElementById('invoice-results');
-          container.innerHTML = "";
-          
-          // 月を取得し、照合マップを作成 (AI解析結果の照合のため)
-          const now = new Date();
-          const ym = now.getFullYear() + "-" + ('0' + (now.getMonth() + 1)).slice(-2);
-          const reconciliationData = await new Promise((resolve, reject) => {
-              google.script.run
-                  .withSuccessHandler(resolve)
-                  .withFailureHandler(reject)
-                  .getReconciliationViewData(ym);
-          }).catch(e => { showToast("照合データ取得エラー"); return []; });
+                    <div id="detail-view-reconcile" class="detail-content">
+                        <h3 style="margin-top:0;">照合結果</h3>
+                        <div class="table-responsive">
+                            <!-- ★ヘッダーに「画像」列を追加 -->
+                            <table class="reconcile-table">
+                                <thead><tr><th>日付</th><th>車両</th><th>請求(L)</th><th>登録(L)</th><th>差分</th><th>判定</th><th>画像</th></tr></thead>
+                                <tbody id="selected-reconcile-tbody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
 
-          const reconciliationMap = {};
-          reconciliationData.forEach(item => {
-              const cleanCar = String(item.carNo || '').replace(/[^\d]/g, '');
-              const dateStr = item.date instanceof Date ? Utilities.formatDate(item.date, "Asia/Tokyo", "yyyy-MM-dd") : String(item.date);
-              const key = `${dateStr}_${cleanCar}`;
-              reconciliationMap[key] = item;
-          });
+            </div>
+        </div>
+    </div>
 
-          invoiceResults.forEach((res, resIndex) => {
-              const p = res.data.parent || {};
-              const children = res.data.child || [];
-              
-              const div = document.createElement('div');
-              div.className = 'invoice-card';
+  </div>
 
-              // 親情報フォーム
-              let parentHtml = `<div class="invoice-detail-grid">`;
-              parentHtml += `<div class="parent-item"><label>請求元</label><input type="text" value="${p.vendorName||''}" onchange="updateParent(${resIndex}, 'vendorName', this.value)"></div>`;
-              parentHtml += `<div class="parent-item"><label>請求日</label><input type="date" value="${p.date||''}" onchange="updateParent(${resIndex}, 'date', this.value)"></div>`;
-              parentHtml += `<div class="parent-item"><label>合計金額</label><input type="number" value="${p.totalAmount||''}" onchange="updateParent(${resIndex}, 'totalAmount', this.value)"></div>`;
-              parentHtml += `<div class="parent-item"><label>請求番号</label><input type="text" value="${p.invoiceNumber||''}" onchange="updateParent(${resIndex}, 'invoiceNumber', this.value)"></div>`;
-              parentHtml += `</div>`;
+  <div id="loading-overlay"><div class="spinner"></div><p id="loading-text" style="font-weight:bold; font-size:1.1rem; color:#555;">AIが解析中...</p></div>
+  <div id="toast"></div>
 
-              // 子情報テーブル
-              let childHtml = `<table class="child-table"><thead><tr><th>利用日</th><th>品名</th><th>数量(L)</th><th>単価</th><th>金額</th><th>車両</th><th>照合</th><th>登録(L)</th></tr></thead><tbody>`;
-              children.forEach((row, childIndex) => {
-                  const cleanCar = String(row.carNo || '').replace(/[^\d]/g, '');
-                  const dateStr = row.date instanceof Date ? Utilities.formatDate(row.date, "Asia/Tokyo", "yyyy-MM-dd") : String(row.date);
-                  const key = `${dateStr}_${cleanCar}`;
-                  const matchResult = reconciliationMap[key];
+  <script>
+    // --- Global State ---
+    let mobileImageData = null;
+    let allStatsData = null; 
+    let currentYm = ""; 
+    let pcQueue = []; 
+    let pcIdCounter = 1;
+    let invoiceResults = []; // AI解析結果を保持し、編集に使う
+    let registeredInvoiceList = []; // 過去の登録済み請求書リスト
+    let currentSelectedInvoiceId = null; 
 
-                  let statusBadge = '';
-                  let reconciledQty = '-';
-
-                  if (matchResult) {
-                      reconciledQty = matchResult.receiptQty > 0 ? matchResult.receiptQty.toFixed(1) + 'L' : '-';
-                      switch (matchResult.status) {
-                          case 'OK': statusBadge = `<span class="status-badge status-ok">OK</span>`; break;
-                          case 'NG': statusBadge = `<span class="status-badge status-ng">数量不一致</span>`; break;
-                          case 'NO_RECEIPT': statusBadge = `<span class="status-badge status-no-receipt">レシートなし</span>`; break;
-                          case 'NO_INVOICE': statusBadge = `<span class="status-badge status-no-invoice">請求のみ</span>`; break;
-                          default: statusBadge = `<span class="status-badge status-gray">不明</span>`; break;
-                      }
-                  }
-                  
-                  childHtml += `
-                      <tr>
-                          <td contenteditable="true" onblur="updateChild(${resIndex}, ${childIndex}, 'date', this)">${row.date||''}</td>
-                          <td contenteditable="true" onblur="updateChild(${resIndex}, ${childIndex}, 'itemName', this)">${row.itemName||''}</td>
-                          <td contenteditable="true" onblur="updateChild(${resIndex}, ${childIndex}, 'quantity', this)">${row.quantity||''}</td>
-                          <td contenteditable="true" onblur="updateChild(${resIndex}, ${childIndex}, 'unitPrice', this)">${row.unitPrice||''}</td>
-                          <td contenteditable="true" onblur="updateChild(${resIndex}, ${childIndex}, 'amount', this)">${(row.amount||0).toLocaleString()}</td>
-                          <td contenteditable="true" onblur="updateChild(${resIndex}, ${childIndex}, 'carNo', this)">${row.carNo||''}</td>
-                          <td>${statusBadge}</td>
-                          <td>${reconciledQty}</td>
-                      </tr>
-                  `;
-              });
-              childHtml += '</tbody></table>';
-
-              div.innerHTML = `
-                  <div class="invoice-header">
-                      <h3>ファイル: ${res.fileName}</h3>
-                      <div style="font-size:0.9rem; color:#666;">（${ym}月で照合）</div>
-                  </div>
-                  ${parentHtml}
-                  <h4 style="margin-top:20px; border-left: 3px solid var(--primary); padding-left: 10px;">明細行（編集可）</h4>
-                  ${childHtml}
-                  <div style="text-align:right; margin-top:10px;">
-                    <button class="btn-small" onclick="addChildRow(${resIndex})" style="border: 1px solid var(--primary); color: var(--primary); background: #fff;"><span class="material-icons">add</span> 行追加</button>
-                  </div>
-              `;
-              container.appendChild(div);
-          });
-
-          document.getElementById('pc-result-area').style.display = 'block';
-          document.getElementById('invoice-initial-area').style.display = 'none';
-          document.getElementById('invoice-detail-area').style.display = 'none';
-      }
-
-      // --- PC Mode Edit Handlers ---
-      window.updateParent = (resIndex, key, value) => {
-          invoiceResults[resIndex].data.parent[key] = value;
-          // 金額が変わった場合は再計算が必要だが、今回は手動入力として簡略化
-      };
-
-      window.updateChild = (resIndex, childIndex, key, cell) => {
-          let value = cell.innerText;
-          if (['quantity', 'unitPrice', 'amount'].includes(key)) {
-              value = Number(value.replace(/,/g, '')) || 0;
-              cell.innerText = value.toLocaleString(); 
-          }
-          invoiceResults[resIndex].data.child[childIndex][key] = value;
-      };
+    window.onload = () => {
+      document.getElementById('camera-input').addEventListener('change', handleMobileCamera);
+      document.getElementById('pc-file-input').addEventListener('change', handlePcFile);
       
-      window.addChildRow = (resIndex) => {
-          const newRow = { 
-              id: Math.random().toString(36).substring(2, 9), 
-              date: '', itemName: '', quantity: 0, unitPrice: 0, amount: 0, carNo: '' 
-          };
-          invoiceResults[resIndex].data.child.push(newRow);
-          // UIをリフレッシュして新しい行を表示
-          renderInvoiceResults(); 
-      };
+      const now = new Date();
+      const defYm = now.getFullYear() + "-" + ('0' + (now.getMonth() + 1)).slice(-2);
+      switchTab('mobile');
+    };
 
-      function saveInvoiceData() {
-        if(invoiceResults.length===0)return; showLoading(true,"保存中...");
-        google.script.run.withSuccessHandler(r=>{
-          showLoading(false); showToast(`${r.count}件の請求書を保存しました`); 
-          
-          // ★ 保存後、アップロードエリアに戻る
+    function switchTab(tabName) {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+      document.getElementById(tabName + '-view').classList.add('active');
+      const items = document.querySelectorAll('.nav-item');
+      items.forEach(el => el.classList.remove('active'));
+      
+      if(tabName === 'mobile') items[0].classList.add('active');
+      if(tabName === 'stats') { 
+          items[1].classList.add('active'); 
+          if(!allStatsData) loadStats(); 
+      }
+      if(tabName === 'invoice') { // ★請求書タブの処理
+          items[2].classList.add('active'); 
+          // 画面サイズに応じて表示を切り替え
+          document.getElementById('pc-view').style.display = 'flex';
+          loadInvoiceList();
+          // 初期表示: 過去の請求書リストが表示される（リストをクリックすると詳細）
           showInitialUploadArea();
-          pcQueue = []; renderPcQueue(); 
-          loadInvoiceList(); // リストを更新
+      }
+    }
 
-        }).withFailureHandler(e=>{showLoading(false);alert("Error:"+e.message)}).saveInvoiceData(invoiceResults);
-      }
-      
-      /* --- Existing Mobile/Stats Logic --- */
-      function loadStats() {
-        showLoading(true, "集計中...");
-        google.script.run.withSuccessHandler(data => {
-          showLoading(false); if(data.error) return alert(data.error);
-          allStatsData = data; renderStatsMonthSelector(data.months);
-          if(data.months.length > 0) renderStatsByMonth(data.months[0]);
-          else document.getElementById('stats-container').innerHTML = '<p style="text-align:center; margin-top:50px;">データがありません</p>';
-        }).withFailureHandler(e => { showLoading(false); alert("Error: " + e.message); }).getUsageStats();
-      }
-      function renderStatsMonthSelector(months) {
-        const el = document.getElementById('month-selector'); el.innerHTML = '';
-        if(months.length === 0) return;
-        const select = document.createElement('select'); select.className = 'month-dropdown';
-        select.onchange = (e) => renderStatsByMonth(e.target.value);
-        months.forEach((m, idx) => {
-          const option = document.createElement('option'); option.value = m; option.textContent = m;
-          if(idx===0) option.selected = true; select.appendChild(option);
-        });
-        el.appendChild(select);
-      }
-      function renderStatsByMonth(yyyymm) {
-        currentYm = yyyymm;
-        const container = document.getElementById('stats-container'); container.innerHTML = '';
-        const monthlyData = allStatsData.stats[yyyymm];
-        if(!monthlyData) { container.innerHTML = '<p style="text-align:center; margin-top:50px;">データなし</p>'; return; }
+    // --- Invoice Flow: 0. Initial View Reset ---
+    function showInitialUploadArea() {
+        // 全て非表示にして、アップロードエリアのみ表示
+        document.getElementById('invoice-detail-area').style.display = 'none';
+        document.getElementById('pc-result-area').style.display = 'none';
+        document.getElementById('invoice-initial-area').style.display = 'block';
         
-        const sortedOffices = Object.keys(monthlyData).sort();
+        // 選択状態をリセット
+        document.querySelectorAll('.invoice-list-item').forEach(el => el.classList.remove('active'));
+        currentSelectedInvoiceId = null;
+    }
 
-        sortedOffices.forEach(office => {
-          const carList = monthlyData[office];
-          const section = document.createElement('div'); section.className = 'office-section';
-          let html = `<div class="office-title">${office}</div>`;
-          html += `<div class="table-responsive"><table class="stats-table"><thead><tr><th class="col-car">車両</th><th>合計<br>給油</th><th>先月<br>メーター</th><th>今月<br>メーター</th><th>距離</th><th>燃費</th><th style="min-width:350px;">日別給油状況 (L)</th></tr></thead><tbody>`;
-          
-          carList.forEach(car => {
-            const mpgDisplay = car.mpg > 0 ? car.mpg.toFixed(2) : '-';
-            const distDisplay = car.dist > 0 ? car.dist.toLocaleString() : '-';
-            const currMeterVal = car.currMeter > 0 ? car.currMeter : '';
-            
-            let daysGrid = '<div class="daily-grid">';
-            const [y, m] = yyyymm.split('-').map(Number);
-            const daysInMonth = new Date(y, m, 0).getDate();
-            
-            for(let d=1; d<=daysInMonth; d++) {
-              const qty = car.days[d]; 
-              const hasData = qty > 0;
-              const qtyLabel = hasData ? Math.round(qty) : ''; 
-              
-              daysGrid += `<div class="day-cell ${hasData?'has-data':''}" onclick="showToast('${d}日: ${hasData ? qty.toFixed(1) + "L" : "給油なし"}')">
-                              <span class="day-num">${d}</span>
-                              ${hasData ? `<span class="day-qty">${qtyLabel}</span>` : ''}
-                          </div>`;
-            }
-            daysGrid += '</div>';
-            
-            html += `<tr>
-                      <td class="col-car">
-                          <div class="car-main-info">車番: ${car.carNo}</div>
-                          <div class="car-sub-info">ドア: ${car.doorNo}</div>
-                      </td>
-                      <td style="font-weight:bold;">${car.totalQty.toFixed(1)}L</td>
-                      <td style="color:#888;">${car.prevMeter>0?car.prevMeter.toLocaleString():'-'}</td>
-                      <td>
-                          <input type="number" class="meter-input" value="${currMeterVal}" placeholder="入力" onchange="updateMeter('${car.carNo}', this.value, this)">
-                          <span class="save-indicator">保存済</span>
-                      </td>
-                      <td>${distDisplay}</td>
-                      <td style="font-weight:bold; color:var(--primary);">${mpgDisplay}</td>
-                      <td style="text-align:left;">${daysGrid}</td>
-                    </tr>`;
-          });
-          html += `</tbody></table></div>`; section.innerHTML = html; container.appendChild(section);
+
+    // --- Invoice Flow: 1. Sidebar List Management ---
+
+    function loadInvoiceList() {
+        showLoading(true, "請求書リスト取得中...");
+        google.script.run
+            .withSuccessHandler(data => {
+                showLoading(false);
+                if (data.error) {
+                    document.getElementById('invoice-list-ul').innerHTML = `<li style="text-align:center; padding:15px; color:red;">${data.error}</li>`;
+                    return;
+                }
+                registeredInvoiceList = data.list;
+                renderInvoiceList(data.list);
+            })
+            .withFailureHandler(e => {
+                showLoading(false);
+                document.getElementById('invoice-list-ul').innerHTML = '<li style="text-align:center; padding:15px; color:red;">リスト取得エラー</li>';
+            })
+            .getInvoiceList();
+    }
+    
+    function renderInvoiceList(list) {
+        const ul = document.getElementById('invoice-list-ul');
+        ul.innerHTML = '';
+        if (list.length === 0) {
+            ul.innerHTML = '<li style="text-align:center; padding:15px; color:#888;">登録済みの請求書はありません</li>';
+            return;
+        }
+
+        list.forEach(item => {
+            const li = document.createElement('li');
+            li.className = 'invoice-list-item';
+            li.setAttribute('data-id', item.id);
+            li.onclick = () => selectInvoice(item.id);
+            li.innerHTML = `
+                <div class="vendor-name">${item.vendor}</div>
+                <div class="meta-info">
+                    <span>${item.date}</span>
+                    <span>合計: ${item.total}円</span>
+                </div>
+            `;
+            ul.appendChild(li);
         });
-      }
+    }
+
+    // --- Invoice Flow: 2. Invoice Detail View ---
+
+    function selectInvoice(invoiceId) {
+        currentSelectedInvoiceId = invoiceId;
+        
+        // UIの切り替え
+        document.querySelectorAll('.invoice-list-item').forEach(el => {
+            el.classList.toggle('active', el.getAttribute('data-id') === invoiceId);
+        });
+        document.getElementById('invoice-initial-area').style.display = 'none';
+        document.getElementById('pc-result-area').style.display = 'none';
+        document.getElementById('invoice-detail-area').style.display = 'block';
+        
+        // データのロード
+        showLoading(true, "明細と照合データを取得中...");
+        google.script.run
+            .withSuccessHandler(data => {
+                showLoading(false);
+                if (data.error) {
+                    document.getElementById('selected-invoice-details').innerHTML = `<p style="color:red;">${data.error}</p>`;
+                    return;
+                }
+                
+                // 明細確認タブの描画
+                renderSelectedInvoiceDetails(data.details);
+                
+                // 照合結果タブの描画
+                renderSelectedInvoiceReconciliation(data.reconciliation);
+
+                // デフォルトで明細タブを表示
+                switchDetailView('details');
+            })
+            .withFailureHandler(e => {
+                showLoading(false);
+                alert("請求書詳細取得エラー: " + e.message);
+            })
+            .getInvoiceDetailsAndReconciliation(invoiceId);
+    }
+    
+    function renderSelectedInvoiceDetails(details) {
+        const container = document.getElementById('selected-invoice-details');
+        container.innerHTML = "";
+        
+        let childHtml = `<table class="child-table"><thead><tr><th>日付</th><th>車両番号</th><th>商品名</th><th>数量(L)</th><th>単価</th><th>金額</th></tr></thead><tbody>`;
+        
+        details.forEach(row => {
+            childHtml += `
+                <tr>
+                    <td>${row.date || '-'}</td>
+                    <td>${row.carNo || '-'}</td>
+                    <td>${row.itemName || '-'}</td>
+                    <td>${(row.quantity || 0).toFixed(2)}</td>
+                    <td>${(row.unitPrice || 0).toLocaleString()}</td>
+                    <td>${(row.amount || 0).toLocaleString()}</td>
+                </tr>
+            `;
+        });
+        childHtml += '</tbody></table>';
+        container.innerHTML = childHtml;
+    }
+
+    function renderSelectedInvoiceReconciliation(reconciliation) {
+        const tbody = document.getElementById('selected-reconcile-tbody'); 
+        tbody.innerHTML = '';
+        if (reconciliation.length === 0) { 
+            tbody.innerHTML = '<tr><td colspan="7" style="padding:30px; color:#888;">照合対象データがありません</td></tr>'; // ★ colspan を 7 に
+            return; 
+        }
+
+        reconciliation.forEach(item => {
+            let statusBadge = '';
+            switch (item.status) {
+                case 'OK': statusBadge = '<span class="status-badge status-ok">OK</span>'; break;
+                case 'NG': statusBadge = '<span class="status-badge status-ng">数量不一致</span>'; break;
+                case 'NO_RECEIPT': statusBadge = '<span class="status-badge status-no-receipt">レシートなし</span>'; break;
+                case 'NO_INVOICE': statusBadge = '<span class="status-badge status-no-invoice">請求書なし</span>'; break;
+                default: statusBadge = '<span class="status-badge status-gray">不明</span>'; break;
+            }
+            const diffClass = item.diff > 0 ? 'diff-plus' : (item.diff < 0 ? 'diff-minus' : '');
+            const diffText = item.diff === 0 ? '-' : (item.diff > 0 ? `+${item.diff.toFixed(2)}` : item.diff.toFixed(2));
+            
+            // ★ 画像確認ボタンのHTMLを生成
+            const imageButtonHtml = item.receiptUrl ? 
+                                    `<button class="btn-image-check" onclick="window.open('${item.receiptUrl}', '_blank')"><span class="material-icons" style="font-size:16px;">visibility</span> 確認</button>` : 
+                                    '-';
+            
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${String(item.date).slice(5)}</td>
+                <td>${item.carNo}</td>
+                <td>${item.invoiceQty > 0 ? item.invoiceQty.toFixed(1) : '-'}</td>
+                <td>${item.receiptQty > 0 ? item.receiptQty.toFixed(1) : '-'}</td>
+                <td class="diff-cell ${diffClass}">${diffText}</td>
+                <td>${statusBadge}</td>
+                <td>${imageButtonHtml}</td> <!-- ★ ボタンを追加 -->
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    function switchDetailView(viewName) {
+        document.querySelectorAll('.detail-content').forEach(el => el.classList.remove('active'));
+        document.getElementById('detail-view-' + viewName).classList.add('active');
+        
+        document.querySelectorAll('.detail-tab').forEach(el => el.classList.remove('active'));
+        document.querySelector(`.detail-tab[onclick*='${viewName}']`).classList.add('active');
+    }
+
+    // --- Invoice Flow: 3. Initial Upload & OCR Logic ---
+    
+    function handlePcFile(e) {
+      const files = Array.from(e.target.files);
+      if(files.length === 0) return;
+      files.forEach(f => { pcQueue.push({ id: pcIdCounter++, files: [f], isCombined: false }); });
+      renderPcQueue(); 
+      e.target.value = ""; 
+    }
+    
+    function renderPcQueue() {
+      const l = document.getElementById('pc-queue'); l.innerHTML = "";
+      if(pcQueue.length === 0) { l.innerHTML = '<li style="padding:20px; text-align:center; color:#888;">ファイルがありません</li>'; return; }
+      pcQueue.forEach(i => {
+        const li = document.createElement('li'); 
+        li.className = i.isCombined ? 'pc-queue-item combined' : 'pc-queue-item';
+        let t = i.files[0].name; 
+        let s = `サイズ: ${(i.files.reduce((sum, f) => sum + f.size, 0) / 1024).toFixed(0)}KB`;
+        let icon = i.isCombined ? 'folder_zip' : 'description';
+        
+        if(i.files.length > 1) { 
+            t = `[結合] ${i.files.length}ファイル (${i.files[0].name}...)`;
+            s = `${i.files.length}ファイル合計`; 
+            icon = 'attach_file';
+        }
+        
+        li.innerHTML = `
+          <input type="checkbox" class="q-chk" value="${i.id}">
+          <div class="q-info" style="flex-grow: 1;">
+            <div class="q-name">${t}</div>
+            <div class="q-sub">${s}</div>
+          </div>
+          <span class="material-icons" style="color:var(--primary);">${icon}</span>
+        `;
+        l.appendChild(li);
+      });
+    }
+
+    function combineSelected(){
+      const c=document.querySelectorAll('.q-chk:checked'); if(c.length<2)return showToast("2つ以上選択してください");
+      const ids=Array.from(c).map(v=>parseInt(v.value));
+      const t=pcQueue.filter(q=>ids.includes(q.id)); const o=pcQueue.filter(q=>!ids.includes(q.id));
+      let m=[]; t.forEach(x=>m=m.concat(x.files));
+      pcQueue=[...o, {id:pcIdCounter++, files:m, isCombined:true}]; renderPcQueue();
+    }
+    function deleteSelected(){
+      const c=document.querySelectorAll('.q-chk:checked'); if(c.length===0)return;
+      const ids=Array.from(c).map(v=>parseInt(v.value)); pcQueue=pcQueue.filter(q=>!ids.includes(q.id)); renderPcQueue();
+    }
+
+    async function runInvoiceOcr() {
+      if(pcQueue.length === 0) return alert("ファイルを追加してください");
+      showLoading(true, "AI解析と照合を実行中...");
       
-      // Mobile Logic
-      async function handleMobileCamera(e) {
-        if(e.target.files.length===0)return; showLoading(true);
-        try {
-          const file=e.target.files[0]; const b64=await readFileAsBase64(file);
-          mobileImageData={mimeType:file.type,base64:b64,name:file.name};
-          document.getElementById('mobile-preview-img').src=`data:${file.type};base64,${b64}`;
-          google.script.run.withSuccessHandler(res=>{
-            if(res.date) document.getElementById('m-date').value = res.date;
-            if(res.company) document.getElementById('m-company').value = res.company;
-            if(res.product) document.getElementById('m-product').value = res.product;
-            if(res.quantity) document.getElementById('m-quantity').value = res.quantity;
-            document.getElementById('m-carno').value=""; document.querySelector('.mobile-camera-btn').style.display='none';
-            document.getElementById('mobile-result').style.display='block'; showLoading(false); showToast("解析完了");
-          }).withFailureHandler(e=>{showLoading(false);alert(e.message)}).analyzeReceipt(mobileImageData);
-        } catch(e){showLoading(false);alert(e)}
+      const payload = [];
+      for(const item of pcQueue) {
+        const fileDataArray = [];
+        for(const f of item.files) {
+          const b64 = await readFileAsBase64(f);
+          fileDataArray.push({ base64: b64, mimeType: f.type, name: f.name });
+        }
+        payload.push({ files: fileDataArray });
       }
-      function submitMobileData() {
-        const d={date:document.getElementById('m-date').value, company:document.getElementById('m-company').value, product:document.getElementById('m-product').value, carNo:document.getElementById('m-carno').value, quantity:document.getElementById('m-quantity').value, imageData:mobileImageData};
-        if(!d.carNo||!d.date)return alert("必須項目を入力してください");
-        showLoading(true,"登録中...");
-        google.script.run.withSuccessHandler(()=>{
-          showLoading(false); showToast("登録しました！"); resetMobile(); allStatsData=null;
-        }).withFailureHandler(e=>{showLoading(false);alert(e.message)}).saveReceiptData(d);
-      }
-      function resetMobile() {
-        document.getElementById('mobile-result').style.display='none'; document.querySelector('.mobile-camera-btn').style.display='flex'; mobileImageData=null;
-        document.querySelectorAll('#mobile-result input').forEach(i=>i.value='');
-      }
+
+      google.script.run
+        .withSuccessHandler(async results => {
+          invoiceResults = results.map(r => {
+            r.data.child = r.data.child.map(c => ({ ...c, id: Math.random().toString(36).substring(2, 9) }));
+            return r;
+          });
+          
+          await renderInvoiceResults();
+          showLoading(false);
+          // 解析後は編集画面に移動
+          document.getElementById('invoice-detail-area').style.display = 'none';
+          document.getElementById('invoice-initial-area').style.display = 'none';
+          document.getElementById('pc-result-area').style.display = 'block';
+
+        })
+        .withFailureHandler(e => {
+          showLoading(false); alert("解析エラー: " + e.message);
+        })
+        .runInvoiceOcr(payload);
+    }
+
+    async function renderInvoiceResults() {
+        const container = document.getElementById('invoice-results');
+        container.innerHTML = "";
+        
+        // 請求書の日付から照合月を決定する (修正箇所)
+        const now = new Date();
+        // 請求書データが存在しない場合のデフォルトとして今月を使用
+        let ym = now.getFullYear() + "-" + ('0' + (now.getMonth() + 1)).slice(-2); 
+
+        if (invoiceResults.length > 0 && 
+            invoiceResults[0].data.parent && 
+            invoiceResults[0].data.parent.date) {
+            
+            const invoiceDateStr = invoiceResults[0].data.parent.date;
+            
+            // YYYY-MM-DD 形式または YYYY/MM/DD 形式から YYYY-MM を抽出
+            if (typeof invoiceDateStr === 'string' && invoiceDateStr.length >= 7) {
+                // スラッシュをハイフンに統一してからsubstringで抽出
+                ym = invoiceDateStr.replace(/\//g, '-').substring(0, 7);
+            }
+        }
+        
+        // GAS側から指定された月のレシート実績を取得し、照合マップを作成
+        const reconciliationData = await new Promise((resolve, reject) => {
+            google.script.run
+                .withSuccessHandler(resolve)
+                .withFailureHandler(reject)
+                .getReconciliationViewData(ym);
+        }).catch(e => { showToast("照合データ取得エラー"); return []; });
+
+        const reconciliationMap = {};
+        reconciliationData.forEach(item => {
+            const cleanCar = String(item.carNo || '').replace(/[^\d]/g, '');
+            // NOTE: GAS側で既に YYYY-MM-DD にフォーマットされていることを前提とする
+            const dateStr = String(item.date); 
+            const key = `${dateStr}_${cleanCar}`;
+            reconciliationMap[key] = item;
+        });
+
+        invoiceResults.forEach((res, resIndex) => {
+            const p = res.data.parent || {};
+            const children = res.data.child || [];
+            
+            const div = document.createElement('div');
+            div.className = 'invoice-card';
+
+            // 親情報フォーム
+            let parentHtml = `<div class="invoice-detail-grid">`;
+            parentHtml += `<div class="parent-item"><label>請求元</label><input type="text" value="${p.vendorName||''}" onchange="updateParent(${resIndex}, 'vendorName', this.value)"></div>`;
+            parentHtml += `<div class="parent-item"><label>請求日</label><input type="date" value="${p.date||''}" onchange="updateParent(${resIndex}, 'date', this.value)"></div>`;
+            parentHtml += `<div class="parent-item"><label>合計金額</label><input type="number" value="${p.totalAmount||''}" onchange="updateParent(${resIndex}, 'totalAmount', this.value)"></div>`;
+            parentHtml += `<div class="parent-item"><label>請求番号</label><input type="text" value="${p.invoiceNumber||''}" onchange="updateParent(${resIndex}, 'invoiceNumber', this.value)"></div>`;
+            parentHtml += `</div>`;
+
+            // 子情報テーブル
+            let childHtml = `<table class="child-table"><thead><tr><th>利用日</th><th>品名</th><th>数量(L)</th><th>単価</th><th>金額</th><th>車両</th><th>照合</th><th>登録(L)</th></tr></thead><tbody>`;
+            children.forEach((row, childIndex) => {
+                const cleanCar = String(row.carNo || '').replace(/[^\d]/g, '');
+                // NOTE: GAS側で既に YYYY-MM-DD にフォーマットされていることを前提とする
+                const dateStr = String(row.date); 
+                const key = `${dateStr}_${cleanCar}`;
+                const matchResult = reconciliationMap[key];
+
+                let statusBadge = '';
+                let reconciledQty = '-';
+
+                if (matchResult) {
+                    reconciledQty = matchResult.receiptQty > 0 ? matchResult.receiptQty.toFixed(1) + 'L' : '-';
+                    switch (matchResult.status) {
+                        case 'OK': statusBadge = `<span class="status-badge status-ok">OK</span>`; break;
+                        case 'NG': statusBadge = `<span class="status-badge status-ng">数量不一致</span>`; break;
+                        case 'NO_RECEIPT': statusBadge = `<span class="status-badge status-no-receipt">レシートなし</span>`; break;
+                        case 'NO_INVOICE': statusBadge = `<span class="status-badge status-no-invoice">請求のみ</span>`; break;
+                        default: statusBadge = `<span class="status-badge status-gray">不明</span>`; break;
+                    }
+                }
+                
+                childHtml += `
+                    <tr>
+                        <td contenteditable="true" onblur="updateChild(${resIndex}, ${childIndex}, 'date', this)">${row.date||''}</td>
+                        <td contenteditable="true" onblur="updateChild(${resIndex}, ${childIndex}, 'itemName', this)">${row.itemName||''}</td>
+                        <td contenteditable="true" onblur="updateChild(${resIndex}, ${childIndex}, 'quantity', this)">${row.quantity||''}</td>
+                        <td contenteditable="true" onblur="updateChild(${resIndex}, ${childIndex}, 'unitPrice', this)">${row.unitPrice||''}</td>
+                        <td contenteditable="true" onblur="updateChild(${resIndex}, ${childIndex}, 'amount', this)">${(row.amount||0).toLocaleString()}</td>
+                        <td contenteditable="true" onblur="updateChild(${resIndex}, ${childIndex}, 'carNo', this)">${row.carNo||''}</td>
+                        <td>${statusBadge}</td>
+                        <td>${reconciledQty}</td>
+                    </tr>
+                `;
+            });
+            childHtml += '</tbody></table>';
+
+            div.innerHTML = `
+                <div class="invoice-header">
+                    <h3>ファイル: ${res.fileName}</h3>
+                    <div style="font-size:0.9rem; color:#666;">（${ym}月で照合）</div>
+                </div>
+                ${parentHtml}
+                <h4 style="margin-top:20px; border-left: 3px solid var(--primary); padding-left: 10px;">明細行（編集可）</h4>
+                ${childHtml}
+                <div style="text-align:right; margin-top:10px;">
+                  <button class="btn-small" onclick="addChildRow(${resIndex})" style="border: 1px solid var(--primary); color: var(--primary); background: #fff;"><span class="material-icons">add</span> 行追加</button>
+                </div>
+            `;
+            container.appendChild(div);
+        });
+
+        document.getElementById('pc-result-area').style.display = 'block';
+        document.getElementById('invoice-initial-area').style.display = 'none';
+        document.getElementById('invoice-detail-area').style.display = 'none';
+    }
+
+    // --- PC Mode Edit Handlers ---
+    window.updateParent = (resIndex, key, value) => {
+        invoiceResults[resIndex].data.parent[key] = value;
+        // 金額が変わった場合は再計算が必要だが、今回は手動入力として簡略化
+    };
+
+    window.updateChild = (resIndex, childIndex, key, cell) => {
+        let value = cell.innerText;
+        if (['quantity', 'unitPrice', 'amount'].includes(key)) {
+            value = Number(value.replace(/,/g, '')) || 0;
+            cell.innerText = value.toLocaleString(); 
+        }
+        invoiceResults[resIndex].data.child[childIndex][key] = value;
+    };
+    
+    window.addChildRow = (resIndex) => {
+        const newRow = { 
+            id: Math.random().toString(36).substring(2, 9), 
+            date: '', itemName: '', quantity: 0, unitPrice: 0, amount: 0, carNo: '' 
+        };
+        invoiceResults[resIndex].data.child.push(newRow);
+        // UIをリフレッシュして新しい行を表示
+        renderInvoiceResults(); 
+    };
+
+    function saveInvoiceData() {
+      if(invoiceResults.length===0)return; showLoading(true,"保存中...");
+      google.script.run.withSuccessHandler(r=>{
+        showLoading(false); showToast(`${r.count}件の請求書を保存しました`); 
+        
+        // ★ 保存後、アップロードエリアに戻る
+        showInitialUploadArea();
+        pcQueue = []; renderPcQueue(); 
+        loadInvoiceList(); // リストを更新
+
+      }).withFailureHandler(e=>{showLoading(false);alert("Error:"+e.message)}).saveInvoiceData(invoiceResults);
+    }
+    
+    /* --- Existing Mobile/Stats Logic --- */
+    function loadStats() {
+      showLoading(true, "集計中...");
+      google.script.run.withSuccessHandler(data => {
+        showLoading(false); if(data.error) return alert(data.error);
+        allStatsData = data; renderStatsMonthSelector(data.months);
+        if(data.months.length > 0) renderStatsByMonth(data.months[0]);
+        else document.getElementById('stats-container').innerHTML = '<p style="text-align:center; margin-top:50px;">データがありません</p>';
+      }).withFailureHandler(e => { showLoading(false); alert("Error: " + e.message); }).getUsageStats();
+    }
+    function renderStatsMonthSelector(months) {
+      const el = document.getElementById('month-selector'); el.innerHTML = '';
+      if(months.length === 0) return;
+      const select = document.createElement('select'); select.className = 'month-dropdown';
+      select.onchange = (e) => renderStatsByMonth(e.target.value);
+      months.forEach((m, idx) => {
+        const option = document.createElement('option'); option.value = m; option.textContent = m;
+        if(idx===0) option.selected = true; select.appendChild(option);
+      });
+      el.appendChild(select);
+    }
+    function renderStatsByMonth(yyyymm) {
+      currentYm = yyyymm;
+      const container = document.getElementById('stats-container'); container.innerHTML = '';
+      const monthlyData = allStatsData.stats[yyyymm];
+      if(!monthlyData) { container.innerHTML = '<p style="text-align:center; margin-top:50px;">データなし</p>'; return; }
       
-      // Utilities
-      function updateMeter(carNo, val, inputEl) { if(!val)return; const i=inputEl.nextElementSibling; google.script.run.withSuccessHandler(()=>{i.classList.add('show');setTimeout(()=>i.classList.remove('show'),2000);}).withFailureHandler(e=>alert("Err:"+e.message)).saveMonthlyMeter(currentYm,carNo,val);}
-      function showLoading(s,t="解析中..."){document.getElementById('loading-overlay').style.display=s?'flex':'none';document.getElementById('loading-text').innerText=t;}
-      function showToast(m){const t=document.getElementById('toast');t.innerText=m;t.style.display='block';setTimeout(()=>t.style.display='none',3000);}
-      function readFileAsBase64(f){return new Promise((r,j)=>{const rd=new FileReader();rd.onload=e=>r(e.target.result.split(',')[1]);rd.onerror=j;rd.readAsDataURL(f);});}
-    </script>
-  </body>
-  </html>
+      const sortedOffices = Object.keys(monthlyData).sort();
+
+      sortedOffices.forEach(office => {
+        const carList = monthlyData[office];
+        const section = document.createElement('div'); section.className = 'office-section';
+        let html = `<div class="office-title">${office}</div>`;
+        html += `<div class="table-responsive"><table class="stats-table"><thead><tr><th class="col-car">車両</th><th>合計<br>給油</th><th>先月<br>メーター</th><th>今月<br>メーター</th><th>距離</th><th>燃費</th><th style="min-width:350px;">日別給油状況 (L)</th></tr></thead><tbody>`;
+        
+        carList.forEach(car => {
+          const mpgDisplay = car.mpg > 0 ? car.mpg.toFixed(2) : '-';
+          const distDisplay = car.dist > 0 ? car.dist.toLocaleString() : '-';
+          const currMeterVal = car.currMeter > 0 ? car.currMeter : '';
+          
+          let daysGrid = '<div class="daily-grid">';
+          const [y, m] = yyyymm.split('-').map(Number);
+          const daysInMonth = new Date(y, m, 0).getDate();
+          
+          for(let d=1; d<=daysInMonth; d++) {
+            const qty = car.days[d]; 
+            const hasData = qty > 0;
+            const qtyLabel = hasData ? Math.round(qty) : ''; 
+            
+            daysGrid += `<div class="day-cell ${hasData?'has-data':''}" onclick="showToast('${d}日: ${hasData ? qty.toFixed(1) + "L" : "給油なし"}')">
+                            <span class="day-num">${d}</span>
+                            ${hasData ? `<span class="day-qty">${qtyLabel}</span>` : ''}
+                        </div>`;
+          }
+          daysGrid += '</div>';
+          
+          html += `<tr>
+                    <td class="col-car">
+                        <div class="car-main-info">車番: ${car.carNo}</div>
+                        <div class="car-sub-info">ドア: ${car.doorNo}</div>
+                    </td>
+                    <td style="font-weight:bold;">${car.totalQty.toFixed(1)}L</td>
+                    <td style="color:#888;">${car.prevMeter>0?car.prevMeter.toLocaleString():'-'}</td>
+                    <td>
+                        <input type="number" class="meter-input" value="${currMeterVal}" placeholder="入力" onchange="updateMeter('${car.carNo}', this.value, this)">
+                        <span class="save-indicator">保存済</span>
+                    </td>
+                    <td>${distDisplay}</td>
+                    <td style="font-weight:bold; color:var(--primary);">${mpgDisplay}</td>
+                    <td style="text-align:left;">${daysGrid}</td>
+                  </tr>`;
+        });
+        html += `</tbody></table></div>`; section.innerHTML = html; container.appendChild(section);
+      });
+    }
+    
+    // Mobile Logic
+    async function handleMobileCamera(e) {
+      if(e.target.files.length===0)return; showLoading(true);
+      try {
+        const file=e.target.files[0]; const b64=await readFileAsBase64(file);
+        mobileImageData={mimeType:file.type,base64:b64,name:file.name};
+        document.getElementById('mobile-preview-img').src=`data:${file.type};base64,${b64}`;
+        google.script.run.withSuccessHandler(res=>{
+          if(res.date) document.getElementById('m-date').value = res.date;
+          if(res.company) document.getElementById('m-company').value = res.company;
+          if(res.product) document.getElementById('m-product').value = res.product;
+          if(res.quantity) document.getElementById('m-quantity').value = res.quantity;
+          document.getElementById('m-carno').value=""; document.querySelector('.mobile-camera-btn').style.display='none';
+          document.getElementById('mobile-result').style.display='block'; showLoading(false); showToast("解析完了");
+        }).withFailureHandler(e=>{showLoading(false);alert(e.message)}).analyzeReceipt(mobileImageData);
+      } catch(e){showLoading(false);alert(e)}
+    }
+    function submitMobileData() {
+      const d={date:document.getElementById('m-date').value, company:document.getElementById('m-company').value, product:document.getElementById('m-product').value, carNo:document.getElementById('m-carno').value, quantity:document.getElementById('m-quantity').value, imageData:mobileImageData};
+      if(!d.carNo||!d.date)return alert("必須項目を入力してください");
+      showLoading(true,"登録中...");
+      google.script.run.withSuccessHandler(()=>{
+        showLoading(false); showToast("登録しました！"); resetMobile(); allStatsData=null;
+      }).withFailureHandler(e=>{showLoading(false);alert(e.message)}).saveReceiptData(d);
+    }
+    function resetMobile() {
+      document.getElementById('mobile-result').style.display='none'; document.querySelector('.mobile-camera-btn').style.display='flex'; mobileImageData=null;
+      document.querySelectorAll('#mobile-result input').forEach(i=>i.value='');
+    }
+    
+    // Utilities
+    function updateMeter(carNo, val, inputEl) { if(!val)return; const i=inputEl.nextElementSibling; google.script.run.withSuccessHandler(()=>{i.classList.add('show');setTimeout(()=>i.classList.remove('show'),2000);}).withFailureHandler(e=>alert("Err:"+e.message)).saveMonthlyMeter(currentYm,carNo,val);}
+    function showLoading(s,t="解析中..."){document.getElementById('loading-overlay').style.display=s?'flex':'none';document.getElementById('loading-text').innerText=t;}
+    function showToast(m){const t=document.getElementById('toast');t.innerText=m;t.style.display='block';setTimeout(()=>t.style.display='none',3000);}
+    function readFileAsBase64(f){return new Promise((r,j)=>{const rd=new FileReader();rd.onload=e=>r(e.target.result.split(',')[1]);rd.onerror=j;rd.readAsDataURL(f);});}
+  </script>
+</body>
+</html>
