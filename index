@@ -2,9 +2,10 @@
 <html>
 <head>
   <base target="_top">
+  <!-- PDF.js ライブラリ -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-  <title>統合OCRアプリ</title>
+  <title>給油管理アプリ</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   
   <style>
@@ -91,6 +92,7 @@
         background-color: #e8f5e9;
         text-align: center;
         cursor: pointer;
+        transition: background-color 0.2s;
     }
 
     /* ---------------------------------------------------- */
@@ -207,17 +209,40 @@
     }
     
     /* Other existing styles */
-    .mobile-camera-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--primary); color: white; width: 100%; padding: 50px 0; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.2); cursor: pointer; margin-top: 10px; max-width: 600px; margin-left: auto; margin-right: auto; }
+    .mobile-camera-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--primary); color: white; width: 100%; padding: 40px 0; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.2); cursor: pointer; margin-top: 10px; max-width: 600px; margin-left: auto; margin-right: auto; }
+    
     .receipt-layout { display: flex; flex-direction: column; gap: 20px; background: white; border-radius: 12px; overflow: hidden; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-    .receipt-img-box { width: 100%; background: #222; text-align: center; position: relative; min-height: 300px; display: flex; align-items: center; justify-content: center; }
+    
+    /* スマホで画像が大きくなりすぎないように調整 */
+    .receipt-img-box { 
+        width: 100%; 
+        background: #222; 
+        text-align: center; 
+        position: relative; 
+        min-height: 250px; 
+        max-height: 40vh; /* 画面高さの40%までに制限 */
+        display: flex; 
+        align-items: center; 
+        justify-content: center; 
+    }
+    .receipt-img-box img { 
+        max-width: 100%; 
+        max-height: 100%; 
+        object-fit: contain; /* アスペクト比を維持して収める */
+    }
+
     /* レシート編集フォームの調整 */
     .receipt-form { 
         padding: 20px; /* フォームのパディングを確保 */
     }
     @media (min-width: 768px) { 
         .receipt-layout { flex-direction: row; align-items: flex-start; } 
-        .receipt-img-box { flex: 1; height: 700px; background: #111; } 
-        .receipt-img-box img { max-height: 100%; } 
+        .receipt-img-box { 
+            flex: 1; 
+            height: 700px; 
+            max-height: none; /* PCでは制限解除 */
+            background: #111; 
+        } 
         .receipt-form { flex: 0 0 450px; border-left: 1px solid #eee; height: 700px; overflow-y: auto; padding: 20px; /* フォームのパディングを確保 */ } 
     }
     
@@ -292,12 +317,20 @@
     .hidden-input { display: none; }
 
     /* モバイル専用のボタン/フォーム調整 */
-    .retake-btn {
+    .img-controls {
         position: absolute;
         bottom: 10px;
-        right: 10px;
+        left: 0;
+        width: 100%;
+        display: flex;
+        justify-content: center;
+        gap: 10px;
+        z-index: 10;
+    }
+    .img-ctrl-btn {
         background: rgba(0, 0, 0, 0.6);
         color: white;
+        border: none;
         padding: 8px 12px;
         border-radius: 20px;
         font-size: 0.9rem;
@@ -306,7 +339,13 @@
         align-items: center;
         gap: 5px;
     }
-    .retake-btn .material-icons { font-size: 18px; }
+    .img-counter {
+        background: rgba(0, 0, 0, 0.6);
+        color: white;
+        padding: 8px 12px;
+        border-radius: 20px;
+        font-size: 0.9rem;
+    }
     
     .btn-image-check {
         padding: 4px 8px;
@@ -322,12 +361,77 @@
         gap: 3px;
         white-space: nowrap;
     }
+    
+    .add-photo-btn-small {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 5px 10px;
+        background: #fff;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        color: #555;
+        cursor: pointer;
+        margin-top: 5px;
+    }
+
+    /* サムネイルリスト用スタイル */
+    #preview-thumbnails {
+        display: flex;
+        overflow-x: auto;
+        gap: 10px;
+        padding: 10px 0;
+        margin-bottom: 20px;
+        scrollbar-width: thin;
+    }
+    .thumb-item {
+        position: relative;
+        flex: 0 0 80px;
+        height: 80px;
+        border-radius: 8px;
+        overflow: hidden;
+        border: 2px solid #ddd;
+    }
+    .thumb-item img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    .thumb-del-btn {
+        position: absolute;
+        top: 2px;
+        right: 2px;
+        background: rgba(0,0,0,0.6);
+        color: white;
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        text-align: center;
+        line-height: 20px;
+        font-size: 14px;
+        cursor: pointer;
+    }
+
+    /* 画像閲覧用モーダル */
+    #image-modal {
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: rgba(0,0,0,0.85); z-index: 2000; display: none;
+        align-items: center; justify-content: center; flex-direction: column;
+    }
+    #image-modal img {
+        max-width: 90%; max-height: 80%; border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    }
+    #image-modal .close-btn {
+        margin-top: 20px; padding: 10px 30px; background: white; color: #333;
+        border: none; border-radius: 20px; font-weight: bold; cursor: pointer;
+    }
   </style>
 </head>
 <body>
 
   <div class="fixed-header">
-    <header class="app-header"><h1>統合OCRアプリ</h1></header>
+    <header class="app-header"><h1>給油管理アプリ</h1></header>
     <nav class="top-nav">
       <div class="nav-item active" onclick="switchTab('mobile')"><span class="material-icons">receipt_long</span> レシート</div>
       <div class="nav-item" onclick="switchTab('stats')"><span class="material-icons">analytics</span> 利用実績</div>
@@ -339,13 +443,45 @@
 
     <!-- TAB 1: Mobile -->
     <div id="mobile-view" class="tab-content active">
-      <label for="camera-input" class="mobile-camera-btn">
-        <span class="material-icons icon">add_a_photo</span><span style="font-weight:bold; font-size: 1.2rem;">レシートを撮影</span><span style="font-size:0.9rem; margin-top:8px; opacity:0.9;">AIが内容を自動入力します</span>
-      </label>
-      <input type="file" id="camera-input" class="hidden-input" accept="image/*" capture="environment">
+      <!-- 撮影・画像選択エリア -->
+      <div id="mobile-input-area">
+          <label for="camera-input" class="mobile-camera-btn">
+            <span class="material-icons icon">add_a_photo</span>
+            <span style="font-weight:bold; font-size: 1.2rem;">レシートを登録</span>
+            <span style="font-size:0.9rem; margin-top:8px; opacity:0.9;">カメラ起動 または アルバムから選択</span>
+          </label>
+          <!-- 複数枚選択可能、PDFも許可 -->
+          <input type="file" id="camera-input" class="hidden-input" accept="image/*,application/pdf" multiple>
+
+          <!-- 選択済み画像リスト表示エリア (初期非表示) -->
+          <div id="preview-list-area" style="display:none; margin-top:20px;">
+             <h3 style="font-size:1rem; color:#555; margin-bottom:5px;">選択された写真 (<span id="img-count-badge">0</span>)</h3>
+             <div id="preview-thumbnails"></div>
+             
+             <button onclick="startAnalysis()" class="btn-save-big" style="width:100%; margin-top:10px;">解析して入力へ進む</button>
+          </div>
+      </div>
+
+      <!-- 解析結果・編集エリア -->
       <div id="mobile-result" style="display:none;">
         <div class="receipt-layout">
-          <div class="receipt-img-box"><img id="mobile-preview-img" src=""><div class="retake-btn" onclick="document.getElementById('camera-input').click()"><span class="material-icons">camera_alt</span> 撮り直す</div></div>
+          <div class="receipt-img-box">
+              <img id="mobile-preview-img" src="">
+              <div class="img-controls">
+                  <button class="img-ctrl-btn" onclick="prevMobileImage()"><span class="material-icons">chevron_left</span></button>
+                  <span id="img-counter-disp" class="img-counter">1 / 1</span>
+                  <button class="img-ctrl-btn" onclick="nextMobileImage()"><span class="material-icons">chevron_right</span></button>
+                  <button class="img-ctrl-btn" onclick="resetMobile()" style="background:rgba(244,67,54,0.8);"><span class="material-icons">delete</span></button>
+              </div>
+          </div>
+          <div style="text-align:center;">
+              <label for="camera-add-input" class="add-photo-btn-small">
+                  <span class="material-icons" style="font-size:16px;">add_a_photo</span> 写真を追加
+              </label>
+              <!-- PDFも許可 -->
+              <input type="file" id="camera-add-input" class="hidden-input" accept="image/*,application/pdf" multiple onchange="addMobileImages(this)">
+          </div>
+
           <div class="receipt-form">
             <!-- ★ フォーム見た目調整: input-group スタイルを適用 -->
             <div class="input-group">
@@ -375,7 +511,11 @@
             </div>
             <div class="input-group">
                 <label>ドア番号 <span style="color:red">*</span></label>
-                <input type="tel" id="m-carno" placeholder="ドア番号を入力">
+                <input type="tel" id="m-carno" placeholder="ドア番号を入力" oninput="updateCarNoDisplay(this.value)">
+            </div>
+            <div class="input-group">
+                <label>車番 (自動表示)</label>
+                <input type="text" id="m-real-carno" placeholder="ドア番号から自動判定" readonly style="background:#f5f5f5; color:#555;">
             </div>
             <!-- ★ ボタンの見た目を画像に合わせる -->
             <button class="btn-save-big" style="background:var(--accent);" onclick="submitMobileData()">登録する</button>
@@ -413,10 +553,12 @@
                 <!-- 0. 初期アップロードエリア -->
                 <div id="invoice-initial-area" class="pc-upload-container-inner">
                     <h2 style="margin-top:0;">請求書の登録・解析</h2>
-                    <div class="pc-uploader-full" onclick="document.getElementById('pc-file-input').click()">
+                    <!-- ★ DnD用のIDを追加 -->
+                    <div id="pc-uploader-area" class="pc-uploader-full" onclick="document.getElementById('pc-file-input').click()">
                         <span class="material-icons">cloud_upload</span>
                         <p style="margin:5px 0; font-weight:bold; font-size:1.1rem;">+ ファイルを選択 / D&D</p>
                         <span style="font-size:0.8rem; color:#666;">PDFや複数画像をまとめて追加できます</span>
+                        <!-- PDFも許可 -->
                         <input type="file" id="pc-file-input" class="hidden-input" multiple accept="application/pdf, image/*">
                     </div>
                     
@@ -475,9 +617,26 @@
   <div id="loading-overlay"><div class="spinner"></div><p id="loading-text" style="font-weight:bold; font-size:1.1rem; color:#555;">AIが解析中...</p></div>
   <div id="toast"></div>
 
+  <!-- 画像閲覧用モーダル (修正後) -->
+  <div id="image-modal">
+    <div id="modal-content-area" style="width:90%; height:80%; background:transparent; display:flex; align-items:center; justify-content:center;">
+        <img id="modal-image-view" src="" style="display:none;">
+    </div>
+    <div style="margin-top:20px; display:flex; gap:15px;">
+        <button class="close-btn" onclick="document.getElementById('image-modal').style.display='none'">閉じる</button>
+        <a id="modal-external-link" href="#" target="_blank" class="close-btn" style="background:var(--primary); color:white; text-decoration:none;">別タブで開く</a>
+    </div>
+  </div>
+
   <script>
+    // PDF.js worker setup
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
     // --- Global State ---
-    let mobileImageData = null;
+    let mobileImages = []; // 画像オブジェクト配列 {mimeType, base64, name, previewBase64, previewMime}
+    let currentImageIndex = 0;
+    let vehicleDoorMap = {}; // ドア番号 -> 車番 のマスタ
+
     let allStatsData = null; 
     let currentYm = ""; 
     let pcQueue = []; 
@@ -492,6 +651,15 @@
       
       const now = new Date();
       const defYm = now.getFullYear() + "-" + ('0' + (now.getMonth() + 1)).slice(-2);
+      
+      // 車両マスタ情報の取得 (ドア番号 -> 車番 の変換用)
+      google.script.run.withSuccessHandler(map => {
+          vehicleDoorMap = map;
+      }).getVehicleDoorMap();
+
+      // ★ PCアップロードエリアのDnD設定
+      setupDragDrop();
+
       switchTab('mobile');
     };
 
@@ -657,7 +825,7 @@
             
             // ★ 画像確認ボタンのHTMLを生成
             const imageButtonHtml = item.receiptUrl ? 
-                                    `<button class="btn-image-check" onclick="window.open('${item.receiptUrl}', '_blank')"><span class="material-icons" style="font-size:16px;">visibility</span> 確認</button>` : 
+                                    `<button class="btn-image-check" onclick="viewImage('${item.receiptUrl}')"><span class="material-icons" style="font-size:16px;">visibility</span> 確認</button>` : 
                                     '-';
             
             const tr = document.createElement('tr');
@@ -690,6 +858,40 @@
       files.forEach(f => { pcQueue.push({ id: pcIdCounter++, files: [f], isCombined: false }); });
       renderPcQueue(); 
       e.target.value = ""; 
+    }
+
+    // ★ DnD設定用の関数
+    function setupDragDrop() {
+        const dropArea = document.getElementById('pc-uploader-area');
+        if (!dropArea) return;
+
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropArea.addEventListener(eventName, () => dropArea.style.backgroundColor = '#e0f7fa', false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, () => dropArea.style.backgroundColor = '#e8f5e9', false);
+        });
+
+        dropArea.addEventListener('drop', handleDrop, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            if (files.length > 0) {
+                // 既存のハンドラを再利用するために擬似的なイベントオブジェクトを作成
+                handlePcFile({ target: { files: files } });
+            }
+        }
     }
     
     function renderPcQueue() {
@@ -938,6 +1140,7 @@
       });
       el.appendChild(select);
     }
+    
     function renderStatsByMonth(yyyymm) {
       currentYm = yyyymm;
       const container = document.getElementById('stats-container'); container.innerHTML = '';
@@ -962,11 +1165,26 @@
           const daysInMonth = new Date(y, m, 0).getDate();
           
           for(let d=1; d<=daysInMonth; d++) {
-            const qty = car.days[d]; 
+            // ★ 新しいデータ構造に対応 (car.days[d] は {qty: number, urls: string[]} または undefined)
+            const dayData = car.days[d]; 
+            const qty = dayData ? dayData.qty : 0;
             const hasData = qty > 0;
             const qtyLabel = hasData ? Math.round(qty) : ''; 
             
-            daysGrid += `<div class="day-cell ${hasData?'has-data':''}" onclick="showToast('${d}日: ${hasData ? qty.toFixed(1) + "L" : "給油なし"}')">
+            // ★ 画像がある場合はクリックでモーダル表示
+            let clickAction = "";
+            if (hasData) {
+                if (dayData.urls && dayData.urls.length > 0) {
+                    // 最新の画像を表示
+                    clickAction = `viewImage('${dayData.urls[0]}')`;
+                } else {
+                    clickAction = `showToast('${d}日: ${qty.toFixed(1)}L (画像なし)')`;
+                }
+            } else {
+                 clickAction = `showToast('${d}日: 給油なし')`;
+            }
+
+            daysGrid += `<div class="day-cell ${hasData?'has-data':''}" onclick="${clickAction}">
                             <span class="day-num">${d}</span>
                             ${hasData ? `<span class="day-qty">${qtyLabel}</span>` : ''}
                         </div>`;
@@ -993,34 +1211,265 @@
       });
     }
     
-    // Mobile Logic
+    // PDFを画像(Base64)に変換するヘルパー関数
+    async function convertPdfToImage(pdfBase64) {
+        const pdfData = atob(pdfBase64);
+        const loadingTask = pdfjsLib.getDocument({data: pdfData});
+        const pdf = await loadingTask.promise;
+        const page = await pdf.getPage(1); // 1ページ目を取得
+        const viewport = page.getViewport({scale: 1.5}); // 少し高画質に
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+        
+        await page.render({canvasContext: context, viewport: viewport}).promise;
+        
+        // ヘッダー(data:image/jpeg;base64,)を除去してBase64部分のみ返す
+        return canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+    }
+
+    // Mobile Logic (Modified for Multiple Images & Car No Display)
     async function handleMobileCamera(e) {
-      if(e.target.files.length===0)return; showLoading(true);
-      try {
-        const file=e.target.files[0]; const b64=await readFileAsBase64(file);
-        mobileImageData={mimeType:file.type,base64:b64,name:file.name};
-        document.getElementById('mobile-preview-img').src=`data:${file.type};base64,${b64}`;
-        google.script.run.withSuccessHandler(res=>{
-          if(res.date) document.getElementById('m-date').value = res.date;
-          if(res.company) document.getElementById('m-company').value = res.company;
-          if(res.product) document.getElementById('m-product').value = res.product;
-          if(res.quantity) document.getElementById('m-quantity').value = res.quantity;
-          document.getElementById('m-carno').value=""; document.querySelector('.mobile-camera-btn').style.display='none';
-          document.getElementById('mobile-result').style.display='block'; showLoading(false); showToast("解析完了");
-        }).withFailureHandler(e=>{showLoading(false);alert(e.message)}).analyzeReceipt(mobileImageData);
-      } catch(e){showLoading(false);alert(e)}
+      if(e.target.files.length === 0) return; 
+      
+      const newFiles = Array.from(e.target.files);
+      if (mobileImages.length === 0) showLoading(true); 
+
+      // 複数画像の読み込み
+      for (const file of newFiles) {
+          try {
+              const b64 = await readFileAsBase64(file);
+              let previewB64 = b64;
+              let previewMime = file.type;
+
+              // PDFの場合は画像に変換してプレビュー用データを作成
+              if (file.type === 'application/pdf') {
+                  try {
+                      previewB64 = await convertPdfToImage(b64);
+                      previewMime = 'image/jpeg';
+                  } catch (e) {
+                      console.error("PDF Preview Error", e);
+                      // エラー時はプレビューは諦めるがデータは保持
+                  }
+              }
+
+              mobileImages.push({ 
+                  mimeType: file.type, 
+                  base64: b64, 
+                  name: file.name,
+                  previewBase64: previewB64,
+                  previewMime: previewMime
+              });
+          } catch(e) {
+              console.error(e);
+          }
+      }
+      
+      // 画像リストの更新
+      renderSelectedImagesList();
+      
+      showLoading(false);
+      e.target.value = ''; // inputをリセット
     }
+
+    // 選択された画像のサムネイル表示と制御
+    function renderSelectedImagesList() {
+        const previewArea = document.getElementById('preview-list-area');
+        const thumbnailsContainer = document.getElementById('preview-thumbnails');
+        const badge = document.getElementById('img-count-badge');
+        
+        thumbnailsContainer.innerHTML = '';
+        badge.innerText = mobileImages.length;
+        
+        if (mobileImages.length > 0) {
+            previewArea.style.display = 'block';
+            
+            mobileImages.forEach((img, index) => {
+                const thumbDiv = document.createElement('div');
+                thumbDiv.className = 'thumb-item';
+                
+                const imgEl = document.createElement('img');
+                // プレビュー用の画像データを表示
+                imgEl.src = `data:${img.previewMime};base64,${img.previewBase64}`;
+                
+                const delBtn = document.createElement('div');
+                delBtn.className = 'thumb-del-btn';
+                delBtn.innerHTML = '&times;';
+                delBtn.onclick = (ev) => {
+                    ev.stopPropagation(); // 親のクリックイベント伝播防止
+                    removeMobileImage(index);
+                };
+                
+                thumbDiv.appendChild(imgEl);
+                thumbDiv.appendChild(delBtn);
+                thumbnailsContainer.appendChild(thumbDiv);
+            });
+        } else {
+            previewArea.style.display = 'none';
+        }
+    }
+
+    function removeMobileImage(index) {
+        mobileImages.splice(index, 1);
+        renderSelectedImagesList();
+    }
+
+    // ★解析開始ボタンで実行される関数
+    function startAnalysis() {
+        if (mobileImages.length === 0) return;
+        
+        showLoading(true, "AI解析中...");
+        
+        // 1枚目の画像を使って解析
+        const firstImage = mobileImages[0];
+        
+        // 解析用のプレビューエリアも更新しておく
+        updateMobilePreview();
+
+        google.script.run.withSuccessHandler(res => {
+            if(res.date) document.getElementById('m-date').value = res.date;
+            if(res.company) document.getElementById('m-company').value = res.company;
+            if(res.product) document.getElementById('m-product').value = res.product;
+            if(res.quantity) document.getElementById('m-quantity').value = res.quantity;
+            
+            if(res.doorNo) {
+                document.getElementById('m-carno').value = res.doorNo;
+                updateCarNoDisplay(res.doorNo); // 車番を自動表示
+            }
+
+            document.getElementById('mobile-input-area').style.display = 'none';
+            document.getElementById('mobile-result').style.display = 'block'; 
+            showLoading(false); 
+            showToast("解析完了");
+        }).withFailureHandler(e => {
+            showLoading(false); 
+            alert(e.message);
+            // 解析失敗でも手動入力へ
+            document.getElementById('mobile-input-area').style.display = 'none';
+            document.getElementById('mobile-result').style.display = 'block'; 
+        }).analyzeReceipt(firstImage);
+    }
+
+    function addMobileImages(input) {
+        handleMobileCamera({ target: input });
+    }
+
+    function updateMobilePreview() {
+        if (mobileImages.length === 0) return;
+        if (currentImageIndex >= mobileImages.length) currentImageIndex = mobileImages.length - 1;
+        const img = mobileImages[currentImageIndex];
+        // プレビュー用の画像データを表示
+        document.getElementById('mobile-preview-img').src = `data:${img.previewMime};base64,${img.previewBase64}`;
+        document.getElementById('img-counter-disp').innerText = `${currentImageIndex + 1} / ${mobileImages.length}`;
+    }
+
+    function nextMobileImage() {
+        if (currentImageIndex < mobileImages.length - 1) {
+            currentImageIndex++;
+            updateMobilePreview();
+        }
+    }
+
+    function prevMobileImage() {
+        if (currentImageIndex > 0) {
+            currentImageIndex--;
+            updateMobilePreview();
+        }
+    }
+    
+    // ドア番号から車番を即時表示
+    function updateCarNoDisplay(doorNo) {
+        const displayEl = document.getElementById('m-real-carno');
+        const d = String(doorNo).trim();
+        if (vehicleDoorMap[d]) {
+            displayEl.value = vehicleDoorMap[d];
+        } else {
+            displayEl.value = d ? "(未登録または検索中)" : "";
+        }
+    }
+
     function submitMobileData() {
-      const d={date:document.getElementById('m-date').value, company:document.getElementById('m-company').value, product:document.getElementById('m-product').value, carNo:document.getElementById('m-carno').value, quantity:document.getElementById('m-quantity').value, imageData:mobileImageData};
-      if(!d.carNo||!d.date)return alert("必須項目を入力してください");
-      showLoading(true,"登録中...");
-      google.script.run.withSuccessHandler(()=>{
-        showLoading(false); showToast("登録しました！"); resetMobile(); allStatsData=null;
-      }).withFailureHandler(e=>{showLoading(false);alert(e.message)}).saveReceiptData(d);
+      const d = {
+          date: document.getElementById('m-date').value, 
+          company: document.getElementById('m-company').value, 
+          product: document.getElementById('m-product').value, 
+          carNo: document.getElementById('m-carno').value, 
+          quantity: document.getElementById('m-quantity').value, 
+          images: mobileImages // 複数画像配列を送信
+      };
+      
+      if(!d.carNo || !d.date) return alert("必須項目を入力してください");
+      
+      showLoading(true, "登録中...");
+      google.script.run.withSuccessHandler(() => {
+        showLoading(false); 
+        showToast("登録しました！"); 
+        resetMobile(); 
+        allStatsData = null;
+      }).withFailureHandler(e => {
+        showLoading(false); 
+        alert("登録エラー: " + e.message);
+      }).saveReceiptData(d);
     }
+    
     function resetMobile() {
-      document.getElementById('mobile-result').style.display='none'; document.querySelector('.mobile-camera-btn').style.display='flex'; mobileImageData=null;
-      document.querySelectorAll('#mobile-result input').forEach(i=>i.value='');
+      document.getElementById('mobile-result').style.display = 'none'; 
+      document.getElementById('mobile-input-area').style.display = 'block'; 
+      mobileImages = [];
+      currentImageIndex = 0;
+      
+      // 画像リスト表示もリセット
+      renderSelectedImagesList();
+
+      document.querySelectorAll('#mobile-result input').forEach(i => i.value = '');
+      // ファイルinputもリセット
+      document.getElementById('camera-input').value = '';
+    }
+
+    // ★ 画像表示用モーダル制御 (Driveプレビュー対応版)
+    function viewImage(url) {
+        const area = document.getElementById('modal-content-area');
+        const extLink = document.getElementById('modal-external-link');
+        
+        // エリアをリセット
+        area.innerHTML = '';
+        extLink.href = url;
+
+        let isDrive = false;
+        let driveId = null;
+
+        // Drive URLの判定とID抽出
+        if (url.indexOf('drive.google.com') !== -1) {
+            const match = url.match(/[-\w]{25,}/);
+            if (match) {
+                isDrive = true;
+                driveId = match[0];
+            }
+        }
+
+        if (isDrive) {
+            // Google Driveの場合、iframeでプレビュー表示
+            // これならCORSに引っかからず、PDFなども表示可能
+            const iframe = document.createElement('iframe');
+            iframe.src = `https://drive.google.com/file/d/${driveId}/preview`;
+            iframe.style.width = '100%';
+            iframe.style.height = '100%';
+            iframe.style.border = 'none';
+            iframe.style.borderRadius = '4px';
+            iframe.style.backgroundColor = 'white'; // 背景を白に
+            area.appendChild(iframe);
+        } else {
+            // 通常画像
+            const img = document.createElement('img');
+            img.src = url;
+            img.style.maxWidth = '100%';
+            img.style.maxHeight = '100%';
+            img.style.boxShadow = '0 4px 12px rgba(0,0,0,0.5)';
+            area.appendChild(img);
+        }
+
+        document.getElementById('image-modal').style.display = 'flex';
     }
     
     // Utilities
